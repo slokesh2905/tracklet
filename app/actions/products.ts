@@ -212,6 +212,8 @@ export async function setProductPublic(
     .single();
   if (error || !data) return fail("Couldn't update sharing");
   revalidatePath(`/products/${productId}`);
+  // Public pages are cached; making one private must take effect immediately.
+  revalidatePath(`/p/${data.share_slug}`);
   return { ok: true, slug: data.share_slug };
 }
 
