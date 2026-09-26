@@ -44,10 +44,10 @@ function scraped(price: number, overrides: Partial<ScrapedProduct> = {}): Scrape
 
 function fakeStore(products: PipelineProduct[]) {
   return {
-    dueProducts: vi.fn(async () => products),
-    saveResult: vi.fn(async () => {}),
-    saveFailure: vi.fn(async () => {}),
-    deliverAlert: vi.fn(async () => ["email"]),
+    dueProducts: vi.fn<PipelineStore["dueProducts"]>(async () => products),
+    saveResult: vi.fn<PipelineStore["saveResult"]>(async () => {}),
+    saveFailure: vi.fn<PipelineStore["saveFailure"]>(async () => {}),
+    deliverAlert: vi.fn<PipelineStore["deliverAlert"]>(async () => ["email"]),
   } satisfies PipelineStore;
 }
 
@@ -86,7 +86,7 @@ describe("mapWithConcurrency", () => {
 
 describe("withRetry", () => {
   it("retries with exponential backoff then succeeds", async () => {
-    const sleep = vi.fn(noSleep);
+    const sleep = vi.fn<(ms: number) => Promise<void>>(noSleep);
     const fn = vi
       .fn<() => Promise<string>>()
       .mockRejectedValueOnce(new Error("1"))

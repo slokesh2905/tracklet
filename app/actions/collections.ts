@@ -64,5 +64,8 @@ export async function setCollectionPublic(
     .single();
   if (error || !data) return fail("Couldn't update sharing");
   revalidate();
+  // Also purges the product pages reached through this collection.
+  revalidatePath(`/c/${data.share_slug}`);
+  revalidatePath("/p/[slug]", "page");
   return { ok: true, slug: data.share_slug };
 }
