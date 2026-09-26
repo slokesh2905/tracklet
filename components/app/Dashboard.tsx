@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import type { DashboardProduct, DashboardStats, ProductStatus } from "@/lib/data";
 import type { CollectionRow } from "@/lib/database.types";
+import { isGreatDeal } from "@/lib/deals";
 import { cn } from "@/lib/utils";
 
 const FILTERS: Array<{ value: "all" | "deals" | ProductStatus; label: string }> = [
@@ -53,7 +54,7 @@ export default function Dashboard({ products, stats, collections }: Props) {
     return products
       .filter((p) => !q || p.name.toLowerCase().includes(q) || p.url.toLowerCase().includes(q))
       .filter((p) =>
-        filter === "all" ? true : filter === "deals" ? p.dealScore >= 80 && p.status !== "new" : p.status === filter
+        filter === "all" ? true : filter === "deals" ? isGreatDeal(p) : p.status === filter
       )
       .filter((p) =>
         collection === "all" ? true : collection === "none" ? !p.collection_id : p.collection_id === collection
@@ -65,7 +66,7 @@ export default function Dashboard({ products, stats, collections }: Props) {
     const c: Record<string, number> = { all: products.length, deals: 0 };
     for (const p of products) {
       c[p.status] = (c[p.status] ?? 0) + 1;
-      if (p.dealScore >= 80 && p.status !== "new") c.deals!++;
+      if (isGreatDeal(p)) c.deals!++;
     }
     return c;
   }, [products]);

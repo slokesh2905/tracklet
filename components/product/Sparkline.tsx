@@ -17,14 +17,15 @@ export default function Sparkline({
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
-  const step = w / (values.length - 1);
+  // Each price gets an equal-width step; the last one extends to the right edge.
+  const step = w / values.length;
   const y = (v: number) => h - 2 - ((v - min) / span) * (h - 4);
 
   let d = `M0 ${y(values[0]!)}`;
   values.slice(1).forEach((v, i) => {
-    const x = (i + 1) * step;
-    d += ` H${x} V${y(v)}`;
+    d += ` H${(i + 1) * step} V${y(v)}`;
   });
+  d += ` H${w}`;
 
   const down = values.at(-1)! < values[0]!;
   const up = values.at(-1)! > values[0]!;

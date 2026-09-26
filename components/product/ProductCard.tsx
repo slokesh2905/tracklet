@@ -159,7 +159,7 @@ export default function ProductCard({ product, collections }: Props) {
         )}
         <ChangeBadge status={product.status} percentChange={product.percentChange} />
         {product.isAllTimeLow && product.status !== "new" && <AllTimeLowBadge />}
-        {product.status !== "new" && <DealBadge score={product.dealScore} label={product.dealLabel} />}
+        {product.status !== "new" && product.in_stock && <DealBadge score={product.dealScore} label={product.dealLabel} />}
         {product.verdict && <VerdictBadge verdict={product.verdict} />}
         {hasRule && (
           <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
