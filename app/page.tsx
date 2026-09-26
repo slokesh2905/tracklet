@@ -65,8 +65,8 @@ export default async function Home() {
       <main>
         <section className="relative overflow-hidden">
           <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,color-mix(in_oklab,var(--color-primary)_14%,transparent),transparent_60%)]" aria-hidden="true" />
-          <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pt-12 pb-16 sm:pt-20 lg:grid-cols-2 lg:gap-16 lg:pb-24">
-            <div className="flex flex-col items-start">
+          <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-4 pt-12 pb-16 sm:pt-20 lg:grid-cols-2 lg:gap-16 lg:pb-24">
+            <div className="flex min-w-0 flex-col items-start">
               <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
                 <Sparkles className="size-3.5 text-primary" /> Now with AI buy-or-wait verdicts
               </span>
@@ -89,7 +89,7 @@ export default async function Home() {
         <section className="border-y bg-muted/40">
           <div className="mx-auto max-w-6xl px-4 py-16 sm:py-20">
             <h2 className="text-center text-2xl font-bold tracking-tight sm:text-3xl">How it works</h2>
-            <ol className="mt-10 grid gap-6 sm:grid-cols-3">
+            <ol className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
               {STEPS.map(({ icon: Icon, title, body }, i) => (
                 <li key={title} className="flex flex-col items-center text-center">
                   <span className="relative flex size-14 items-center justify-center rounded-2xl bg-primary/12 text-primary">
@@ -108,7 +108,7 @@ export default async function Home() {
 
         <section className="mx-auto max-w-6xl px-4 py-16 sm:py-24">
           <h2 className="text-center text-2xl font-bold tracking-tight sm:text-3xl">Everything you need to stop overpaying</h2>
-          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map(({ icon: Icon, title, body }) => (
               <div key={title} className="rounded-xl border bg-card p-5">
                 <Icon className="size-5 text-primary" />

@@ -8,6 +8,7 @@ import type {
   UserSettingsRow,
 } from "@/lib/database.types";
 import { convert, getRates } from "@/lib/currency";
+import { isGreatDeal } from "@/lib/deals";
 import { DAY_MS } from "@/lib/format";
 import { computeInsights, type Insights, type PricePoint } from "@/lib/insights";
 import { createClient, getUser } from "@/lib/supabase/server";
@@ -129,7 +130,7 @@ export const getDashboardData = cache(async () => {
     currency: settings.preferred_currency,
     totalSavings,
     biggestDrop,
-    greatDeals: products.filter((p) => p.dealScore >= 80 && p.status !== "new").length,
+    greatDeals: products.filter(isGreatDeal).length,
     unreadAlerts: unreadAlerts ?? 0,
   };
 

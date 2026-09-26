@@ -88,7 +88,7 @@ function CollectionCard({ collection }: { collection: Collection }) {
   const count = collection.products.length;
 
   return (
-    <article className="flex flex-col gap-4 rounded-xl border bg-card p-4">
+    <article className="flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className="truncate font-semibold">{collection.name}</h2>
@@ -202,7 +202,7 @@ export default function CollectionsView({ collections }: { collections: Collecti
           </Button>
         </section>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {collections.map((c) => (
             <CollectionCard key={c.id} collection={c} />
           ))}
