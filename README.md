@@ -1,0 +1,129 @@
+<div align="center">
+
+# Tracklet
+
+**Buy at the right price, every time.**
+
+Track prices from any online store, see an honest price history, and get alerted the moment a product hits the price you want.
+
+[![CI](https://github.com/slokesh2905/tracklet/actions/workflows/ci.yml/badge.svg)](https://github.com/slokesh2905/tracklet/actions/workflows/ci.yml)
+![Next.js 16](https://img.shields.io/badge/Next.js-16-black)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20RLS-3ecf8e)
+
+</div>
+
+<p align="center">
+  <img src="docs/screenshots/dashboard-desktop.png" alt="Tracklet dashboard" width="760" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/product-desktop.png" alt="Product price history, insights and alert rules" width="760" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/dashboard-mobile.png" alt="Dashboard on a phone" width="240" />
+  &nbsp;
+  <img src="docs/screenshots/product-mobile.png" alt="Product detail on a phone" width="240" />
+  &nbsp;
+  <img src="docs/screenshots/alerts-mobile.png" alt="Alerts on a phone" width="240" />
+</p>
+
+## Features
+
+- **Track any store.** Paste a link (or 20 at once). Firecrawl extracts name, price, currency, stock and list price, with an LLM fallback when structured extraction fails.
+- **Smart alerts.** Set a target price or a minimum % drop. You're alerted when the price *crosses* the target, when it hits a new all-time low, or when an item is back in stock. Delivery by email (React Email + Resend) and Discord webhook, plus a weekly digest.
+- **Honest price insights.** Step-function charts with 7D/30D/90D/All ranges, time-weighted averages, 30/90-day ranges, a regression trend, and a **0–100 deal score**.
+- **AI "buy now or wait?" verdict.** Structured output from the Vercel AI SDK, grounded only in computed statistics, cached per price and rate-limited per user in Postgres.
+- **Collections & sharing.** Group products into wishlists. Public product and collection pages are cached with ISR and get generated Open Graph images.
+- **Multi-currency.** Totals convert into your preferred currency using daily ECB rates.
+- **Mobile-first PWA.** Installable, with a bottom tab bar, bottom-sheet dialogs, 44px touch targets and safe-area insets. E2E tests fail on horizontal overflow at every viewport.
+- CSV export, dark mode, and sign-in with Google, GitHub or an email magic link.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  U[Browser / PWA] -->|Server Actions| N[Next.js 16 App Router]
+  N -->|RLS-scoped client| DB[(Supabase Postgres)]
+  N -->|scrape| FC[Firecrawl]
+  N -->|verdicts, categories| AI[Vercel AI Gateway]
+  C[Vercel Cron] -->|daily| P[Price-check pipeline]
+  P -->|service role| DB
+  P -->|1 scrape per distinct URL| FC
+  P --> E[Resend email]
+  P --> D[Discord webhook]
+  A[Anonymous visitor] -->|security-definer RPC| DB
+```
+
+### Engineering highlights
+
+| Area | What was done |
+| --- | --- |
+| **Scalable pipeline** ([lib/pipeline.ts](lib/pipeline.ts)) | Picks the stalest products first. Each **distinct URL is scraped once per run** and the result fans out to every user tracking it. Bounded concurrency, exponential-backoff retries, a time budget under the function limit, and auto-pause after 5 consecutive failures. Each run is logged to `check_runs`. Scrapes are also reused across users within a 6-hour window when someone adds a product. |
+| **Security** | RLS on every table, keyed on `auth.uid()`. Anonymous visitors never touch tables: public pages call `security definer` functions that return whitelisted columns. Discord webhooks are validated by regex. Cron auth uses a constant-time comparison. Open-redirect-safe auth callback. Emails are rendered by React Email, so scraped text is escaped. CSV export neutralises spreadsheet formula injection. |
+| **Correct maths** ([lib/insights.ts](lib/insights.ts)) | History stores only price *changes*, so it's a step function. Averages are **time-weighted**, window stats include the price in effect at the window start, and the trend is a least-squares slope over daily samples. |
+| **Alert rules** ([lib/alerts.ts](lib/alerts.ts)) | A pure, prioritised rule engine: one notification per change, target alerts fire on crossing only (no daily spam), and out-of-stock prices are ignored. |
+| **Type safety** | Strict TypeScript, typed Supabase clients, Zod validation on every server action and on the environment. |
+| **Testing** | 50+ Vitest unit tests. Playwright E2E runs on **desktop Chrome, iPhone 13 (WebKit) and Pixel 7** against a real local Supabase, signing in through the actual magic-link flow via the local mail inbox. |
+| **CI** | GitHub Actions: lint → typecheck → unit tests → build, then E2E with `supabase start` (migrations + seed). |
+
+## Tech stack
+
+Next.js 16 (App Router, Server Actions, ISR, `next/og`) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui · Recharts · Supabase (Postgres, Auth, RLS) · Firecrawl · Vercel AI SDK 7 + AI Gateway · Resend + React Email · Zod · Vitest · Playwright · Vercel (Cron, Fluid Compute)
+
+## Data model
+
+Defined in [supabase/migrations](supabase/migrations/20260927000000_init.sql):
+
+- `products`: one row per user × URL, plus alert rules, denormalised low/high (kept in sync by a trigger), pipeline bookkeeping and a share slug
+- `price_history`: append-only; a row is written only when price or stock changes
+- `alerts`: log of every alert sent and the channels it reached
+- `collections`, `user_settings`, `product_insights` (cached AI verdicts), `ai_usage` (quota), `check_runs` (cron log)
+
+## Running locally
+
+Requires Node 22+ and Docker.
+
+```bash
+git clone https://github.com/slokesh2905/tracklet.git
+cd tracklet
+npm install
+
+# Local Postgres + Auth + mail inbox, with migrations and demo data applied
+npx supabase start
+npx supabase status          # copy the API URL and keys into .env.local
+
+cp .env.example .env.local   # then fill in the values
+npm run dev
+```
+
+Sign in as `demo@tracklet.dev` with the email magic link. It arrives in the local inbox at http://127.0.0.1:54324.
+
+To add real products you need a [Firecrawl](https://firecrawl.dev) key. Email alerts need a [Resend](https://resend.com) key. AI features need an [AI Gateway](https://vercel.com/ai-gateway) key locally; on Vercel they use OIDC automatically.
+
+### Tests
+
+```bash
+npm test                 # unit tests
+npm run test:e2e         # E2E on desktop + iPhone + Pixel (local Supabase must be running)
+npm run lint && npm run typecheck
+```
+
+Trigger a price check locally:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/check-prices
+```
+
+## Deploying
+
+1. Create a Supabase project, then run `npx supabase link` and `npx supabase db push`.
+2. In Supabase Auth, enable Google and GitHub, and add `https://<your-domain>/auth/callback` to the redirect URLs.
+3. Import the repo into Vercel and set the variables from `.env.example`. The crons in [vercel.ts](vercel.ts) register automatically.
+
+## Credits
+
+Tracklet began as a price-tracker project by [Aman Tiwari](https://github.com/AmanTiwari404). This version is a ground-up rebuild by [Lokesh](https://github.com/slokesh2905) covering the TypeScript migration, schema and security model, pipeline, alerts, insights, AI features, sharing, redesign and test suite.
+
+## License
+
+[MIT](LICENSE)
