@@ -76,3 +76,33 @@ test.describe("signed in", () => {
     expect(await res.text()).toContain("Sony WH-1000XM5");
   });
 });
+
+test.describe("shared data and useful verdicts from day one", () => {
+  test("price history is shared between shoppers tracking the same product", async ({ page }) => {
+    await page.goto("/dashboard");
+    const sony = page.getByRole("article").filter({ hasText: "Sony WH-1000XM5" });
+    await expect(sony.getByText("2 tracking")).toBeVisible();
+    await sony.getByRole("link", { name: /Sony WH-1000XM5/ }).click();
+    await expect(page.getByText(/Price data since .* from 2 shoppers/)).toBeVisible();
+  });
+
+  test("a verified cheaper listing on another store is shown", async ({ page }) => {
+    await page.goto("/dashboard");
+    await expect(page.getByText(/Cheaper on Croma/)).toBeVisible();
+
+    await page.getByRole("link", { name: /Sony WH-1000XM5/ }).click();
+    const stores = page.getByRole("region", { name: "Other stores" });
+    await expect(stores.getByRole("link", { name: /Croma.*Same item/ })).toBeVisible();
+    await expect(stores.getByText("Similar")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("a product added today shows facts instead of an AI guess", async ({ page }) => {
+    await page.goto("/dashboard");
+    await page.getByRole("link", { name: /Logitech MX Master 3S/ }).click();
+    await expect(page.getByText(/too early to judge this price/)).toBeVisible();
+    await expect(page.getByText("17% off", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Compare other stores now" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Analyse this price" })).toHaveCount(0);
+  });
+});

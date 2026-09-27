@@ -32,10 +32,12 @@ Track prices from any online store, see an honest price history, and get alerted
 
 ## Features
 
-- **Track any store.** Paste a link (or 20 at once). Firecrawl extracts name, price, currency, stock and list price, with an LLM fallback when structured extraction fails.
+- **Track any store, reliably.** Paste a link, a share link like `dl.flipkart.com/s/…`, or 20 links at once. Prices are read from each page's own structured data (JSON-LD, OpenGraph, retailer selectors), with Firecrawl and an LLM only as fallbacks. A **price guard** rejects misreads (e.g. a "₹25" label on a ₹5,995-MRP item) and holds surprising jumps until a second reading confirms them, so a bad scrape can never trigger a false alert.
+- **Shared price history.** Products are identified by retailer ID (Amazon ASIN, Flipkart pid, Myntra ID…), so every shopper tracking the same product pools one history. New trackers see prices recorded before they arrived.
+- **Cross-store comparison.** Finds the same item on Amazon, Flipkart, Myntra, Tata CLiQ, Croma and more, with an LLM judge that separates *exact* matches from similar variants.
 - **Smart alerts.** Set a target price or a minimum % drop. You're alerted when the price *crosses* the target, when it hits a new all-time low, or when an item is back in stock. Delivery by email (React Email via Gmail SMTP, or Resend) and Discord webhook, plus a weekly digest.
 - **Honest price insights.** Step-function charts with 7D/30D/90D/All ranges, time-weighted averages, 30/90-day ranges, a regression trend, and a **0–100 deal score**.
-- **AI "buy now or wait?" verdict.** Structured output from the Vercel AI SDK running NVIDIA Nemotron (free API) or any AI Gateway model, grounded only in computed statistics, cached per price and rate-limited per user in Postgres.
+- **Evidence-based "buy now or wait?".** Code decides what the evidence supports (enough history, a cheaper exact match elsewhere, or not enough data yet) and computes confidence from data coverage. NVIDIA Nemotron (free API, via the AI SDK) only chooses buy/wait/fair and explains, citing the numbers. A product added today gets facts (discount off MRP, other stores) instead of an empty low-confidence verdict.
 - **Collections & sharing.** Group products into wishlists. Public product and collection pages are cached with ISR and get generated Open Graph images.
 - **Multi-currency.** Totals convert into your preferred currency using daily ECB rates.
 - **Mobile-first PWA.** Installable, with a bottom tab bar, bottom-sheet dialogs, 44px touch targets and safe-area insets. E2E tests fail on horizontal overflow at every viewport.
@@ -63,12 +65,14 @@ flowchart LR
 
 | Area | What was done |
 | --- | --- |
-| **Scalable pipeline** ([lib/pipeline.ts](lib/pipeline.ts)) | Picks the stalest products first. Each **distinct URL is scraped once per run** and the result fans out to every user tracking it. Bounded concurrency, exponential-backoff retries, a time budget under the function limit, and auto-pause after 5 consecutive failures. Each run is logged to `check_runs`. Scrapes are also reused across users within a 6-hour window when someone adds a product. |
+| **Catalog model** ([lib/db/schema.ts](lib/db/schema.ts), [lib/product-key.ts](lib/product-key.ts), [lib/catalog.ts](lib/catalog.ts)) | `catalog_items` hold one row per real product, keyed by retailer ID after resolving share links; `products` are per-user tracking rows (alert rules, collection, sharing). History, AI verdicts and store offers hang off the catalog item, so they're shared. Duplicates found later are merged transactionally. |
+| **Scalable pipeline** ([lib/pipeline.ts](lib/pipeline.ts)) | Visits the stalest catalog items first, **once per product however many users track it**, then fans alerts out to every tracker's own rules. Bounded concurrency, exponential-backoff retries, a time budget under the function limit, auto-pause after 5 failures, and per-run metrics (including held and rejected readings) in `check_runs`. |
+| **Free by design** ([lib/scraper.ts](lib/scraper.ts), [lib/credit-budget.ts](lib/credit-budget.ts)) | A tiered reader: a free direct fetch plus structured data, then a 1-credit Firecrawl scrape only when a store blocks it (down from 5 credits for LLM JSON extraction), then free Nemotron. Comparisons only spend credits left over after reserving enough for every remaining daily check this billing period, so the free plan never runs out. No service has a card on file. |
 | **Security** | The database is only reachable from the server. Every query in the data layer ([lib/data.ts](lib/data.ts), [app/actions](app/actions)) is scoped to the session's user, and an E2E test signs in as a second account to prove it can't see or export another user's data. Public pages select only whitelisted columns. Better Auth provides CSRF/origin checks, rejects off-site callback URLs, and stores rate-limit counters in Postgres so limits hold across serverless instances. Cron auth uses a constant-time comparison. Emails are rendered by React Email, so scraped text is escaped. CSV export neutralises formula injection. |
 | **Correct maths** ([lib/insights.ts](lib/insights.ts)) | History stores only price *changes*, so it's a step function. Averages are **time-weighted**, window stats include the price in effect at the window start, and the trend is a least-squares slope over daily samples. |
 | **Alert rules** ([lib/alerts.ts](lib/alerts.ts)) | A pure, prioritised rule engine: one notification per change, target alerts fire on crossing only (no daily spam), and out-of-stock prices are ignored. |
 | **Type safety** | Strict TypeScript end to end: the Drizzle schema is the single source of truth for tables, migrations and row types. Zod validates every server action and the environment. CI fails if the schema changes without a migration. |
-| **Testing** | 55 Vitest unit tests. Playwright E2E runs on **desktop Chrome, iPhone 13 (WebKit) and Pixel 7** against a real, freshly seeded Postgres, signing in through the actual magic-link flow. |
+| **Testing** | 96 Vitest unit tests, including extractors run against saved real Amazon.in and Flipkart pages. Playwright E2E runs on **desktop Chrome, iPhone 13 (WebKit) and Pixel 7** against a real, freshly seeded Postgres, signing in through the actual magic-link flow. |
 | **CI** | GitHub Actions: lint → typecheck → unit tests → migration drift check → build, then E2E against a Postgres service container. |
 | **Infra** | Neon provisioned through the Vercel Marketplace. Functions are pinned to the database's region (Singapore), use `node-postgres` with a pool attached to Fluid compute, and migrations run on the direct (non-pooled) URL during each deploy. |
 
@@ -78,13 +82,17 @@ Next.js 16 (App Router, Server Actions, ISR, `next/og`) · React 19 · TypeScrip
 
 ## Data model
 
-Defined in [lib/db/schema.ts](lib/db/schema.ts), with SQL migrations generated into [drizzle/](drizzle) (plus a hand-written migration for triggers):
+Defined in [lib/db/schema.ts](lib/db/schema.ts), with SQL migrations generated into [drizzle/](drizzle) (plus hand-written migrations for triggers and data moves):
 
-- `products`: one row per user × URL, plus alert rules, denormalised low/high (kept in sync by a trigger), pipeline bookkeeping and a share slug
-- `price_history`: append-only; a row is written only when price or stock changes
-- `alerts`: log of every alert sent and the channels it reached
-- `collections`, `user_settings`, `product_insights` (cached AI verdicts), `ai_usage` (atomic daily quota), `check_runs` (cron log)
+- `catalog_items`: one per real product (`key` = retailer ID), holding current/list price, stock, low/high (kept by a trigger), pending readings awaiting confirmation, and check bookkeeping
+- `products`: a user tracking a catalog item, with their alert rules, collection and share link
+- `price_history`: the shared, append-only history per catalog item, with the source of each reading
+- `store_offers`: the same or similar product on other stores, from cross-store comparison
+- `item_insights`: cached AI verdicts with the evidence they were based on
+- `alerts`, `collections`, `user_settings`, `ai_usage` (atomic daily quota), `check_runs` (cron metrics)
 - `user`, `session`, `account`, `verification`, `rate_limit`: Better Auth
+
+Maintenance scripts (dry run by default, `-- --apply` to write): `npm run db:fix-outliers` removes history rows the price guard would reject, and `npm run db:rekey` resolves real product IDs and merges duplicates.
 
 ## Running locally
 

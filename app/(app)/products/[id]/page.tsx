@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, ImageOff, PackageX } from "lucide-react";
 import AiVerdictCard from "@/components/product/AiVerdictCard";
+import OtherStores from "@/components/product/OtherStores";
 import AlertRulesForm from "@/components/product/AlertRulesForm";
 import { AllTimeLowBadge, DealBadge } from "@/components/product/Badges";
 import InsightsPanel from "@/components/product/InsightsPanel";
@@ -25,9 +26,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 }
 
 function Section({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
+  const id = `section-${title.toLowerCase().replace(/\W+/g, "-")}`;
   return (
-    <section className={`rounded-xl border bg-card p-4 ${className ?? ""}`}>
-      <h2 className="mb-3 font-semibold">{title}</h2>
+    <section aria-labelledby={id} className={`rounded-xl border bg-card p-4 ${className ?? ""}`}>
+      <h2 id={id} className="mb-3 font-semibold">{title}</h2>
       {children}
     </section>
   );
@@ -39,7 +41,7 @@ export default async function ProductPage({ params }: Params) {
   const detail = await getProductDetail(id);
   if (!detail) notFound();
 
-  const { product, history, insights, verdict, staleVerdict, alerts } = detail;
+  const { product, history, insights, evidence, gate, offers, comparedAt, verdict, staleVerdict, alerts } = detail;
   const discount =
     product.original_price && Number(product.original_price) > product.current_price
       ? percentChange(Number(product.original_price), product.current_price)
@@ -101,7 +103,8 @@ export default async function ProductPage({ params }: Params) {
             {insights.dataPoints > 1 && <DealBadge score={insights.dealScore} label={insights.dealLabel} />}
           </div>
           <p className="mt-2 text-xs text-muted-foreground" suppressHydrationWarning>
-            Tracking since {formatDate(product.created_at)}
+            Price data since {formatDate(evidence.firstSeen)}
+            {evidence.shoppers > 1 && ` from ${evidence.shoppers} shoppers`}
             {product.last_checked_at && ` · last checked ${timeAgo(product.last_checked_at)}`}
           </p>
           <div className="mt-4">
@@ -127,9 +130,26 @@ export default async function ProductPage({ params }: Params) {
         </div>
 
         <aside className="flex min-w-0 flex-col gap-4">
-          {isAiEnabled() && (
-            <AiVerdictCard productId={product.id} verdict={verdict} stale={staleVerdict} enabled />
+          {(isAiEnabled() || gate.kind === "insufficient") && (
+            <AiVerdictCard
+              productId={product.id}
+              verdict={verdict}
+              stale={staleVerdict}
+              aiEnabled={isAiEnabled()}
+              gate={gate}
+              facts={{
+                currency: product.currency,
+                originalPrice: product.original_price,
+                discountPct: evidence.discountPct,
+                daysTracked: insights.daysTracked,
+                shoppers: evidence.shoppers,
+                firstSeen: evidence.firstSeen,
+              }}
+            />
           )}
+          <Section title="Other stores">
+            <OtherStores productId={product.id} offers={offers} currentPrice={product.current_price} comparedAt={comparedAt} />
+          </Section>
           <Section title="Price alert">
             <AlertRulesForm
               productId={product.id}

@@ -1,63 +1,56 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  groupByUrl,
   mapWithConcurrency,
   MAX_FAILURES,
   runPriceCheck,
   withRetry,
-  type PipelineProduct,
+  type PipelineItem,
   type PipelineStore,
+  type Tracker,
 } from "@/lib/pipeline";
 import type { ScrapedProduct, Scraper } from "@/lib/scraper";
 
 const noSleep = () => Promise.resolve();
 
-function product(overrides: Partial<PipelineProduct> = {}): PipelineProduct {
+function item(overrides: Partial<PipelineItem> = {}): PipelineItem {
   return {
     id: crypto.randomUUID(),
-    user_id: "user-1",
     url: "https://shop.test/a",
     name: "Thing",
     current_price: 100,
-    currency: "USD",
+    original_price: 150,
+    currency: "INR",
     image_url: null,
     in_stock: true,
-    target_price: null,
-    alert_pct: null,
     lowest_price: 100,
+    pending_price: null,
     fail_count: 0,
     ...overrides,
   };
 }
 
+const tracker = (o: Partial<Tracker> = {}): Tracker => ({
+  id: crypto.randomUUID(),
+  user_id: "u1",
+  target_price: null,
+  alert_pct: null,
+  ...o,
+});
+
 function scraped(price: number, overrides: Partial<ScrapedProduct> = {}): ScrapedProduct {
-  return {
-    name: "Thing",
-    price,
-    currency: "USD",
-    imageUrl: null,
-    inStock: true,
-    originalPrice: null,
-    ...overrides,
-  };
+  return { name: "Thing", price, currency: "INR", imageUrl: null, inStock: true, originalPrice: 150, method: "jsonld", via: "direct", ...overrides };
 }
 
-function fakeStore(products: PipelineProduct[]) {
+function fakeStore(items: PipelineItem[], trackers: Tracker[] = [tracker()]) {
   return {
-    dueProducts: vi.fn<PipelineStore["dueProducts"]>(async () => products),
+    dueItems: vi.fn<PipelineStore["dueItems"]>(async () => items),
     saveResult: vi.fn<PipelineStore["saveResult"]>(async () => {}),
+    saveHeld: vi.fn<PipelineStore["saveHeld"]>(async () => {}),
     saveFailure: vi.fn<PipelineStore["saveFailure"]>(async () => {}),
+    trackersOf: vi.fn<PipelineStore["trackersOf"]>(async () => trackers),
     deliverAlert: vi.fn<PipelineStore["deliverAlert"]>(async () => ["email"]),
   } satisfies PipelineStore;
 }
-
-describe("groupByUrl", () => {
-  it("groups rows sharing a URL", () => {
-    const groups = groupByUrl([{ url: "a" }, { url: "b" }, { url: "a" }]);
-    expect(groups.get("a")).toHaveLength(2);
-    expect(groups.size).toBe(2);
-  });
-});
 
 describe("mapWithConcurrency", () => {
   it("never exceeds the limit", async () => {
@@ -74,12 +67,7 @@ describe("mapWithConcurrency", () => {
 
   it("stops starting work when shouldStart turns false", async () => {
     let started = 0;
-    const results = await mapWithConcurrency(
-      [1, 2, 3, 4, 5],
-      1,
-      async (n) => n * 2,
-      () => started++ < 2
-    );
+    const results = await mapWithConcurrency([1, 2, 3, 4, 5], 1, async (n) => n * 2, () => started++ < 2);
     expect(results).toEqual([2, 4, undefined, undefined, undefined]);
   });
 });
@@ -106,68 +94,74 @@ describe("withRetry", () => {
 });
 
 describe("runPriceCheck", () => {
-  it("scrapes a URL once even when several users track it", async () => {
-    const products = [
-      product({ user_id: "u1" }),
-      product({ user_id: "u2" }),
-      product({ user_id: "u3", url: "https://shop.test/b" }),
-    ];
-    const scraper: Scraper = { scrape: vi.fn(async () => scraped(100)) };
-    const store = fakeStore(products);
+  it("reads each catalog item once and alerts every tracker by their own rules", async () => {
+    const a = tracker({ user_id: "u1" }); // no rules: any drop
+    const b = tracker({ user_id: "u2", target_price: 50 }); // target not reached
+    const c = tracker({ user_id: "u3", alert_pct: 5 }); // 10% ≥ 5%
+    const store = fakeStore([item()], [a, b, c]);
+    const scraper: Scraper = { scrape: vi.fn(async () => scraped(90)) };
 
     const summary = await runPriceCheck(scraper, store, { sleep: noSleep });
 
-    expect(scraper.scrape).toHaveBeenCalledTimes(2);
-    expect(summary.urlsScraped).toBe(2);
-    expect(summary.productsChecked).toBe(3);
-    expect(store.saveResult).toHaveBeenCalledTimes(3);
+    expect(scraper.scrape).toHaveBeenCalledTimes(1);
+    expect(summary).toMatchObject({ itemsChecked: 1, priceChanges: 1, alertsSent: 2 });
+    expect(store.deliverAlert.mock.calls.map(([e]) => e.tracker.user_id)).toEqual(["u1", "u3"]);
+    expect(store.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: true, confirmed: false });
   });
 
-  it("records price changes and delivers alerts per user", async () => {
-    const products = [product({ user_id: "u1" }), product({ user_id: "u2", target_price: 50 })];
-    const scraper: Scraper = { scrape: async () => scraped(90) };
-    const store = fakeStore(products);
-
-    const summary = await runPriceCheck(scraper, store, { sleep: noSleep });
-
-    expect(summary.priceChanges).toBe(2);
-    // u1 has no rules -> alerted on the drop; u2's target (50) was not reached.
-    expect(store.deliverAlert).toHaveBeenCalledTimes(1);
-    expect(store.deliverAlert.mock.calls[0]![0]).toMatchObject({
-      kind: "all_time_low",
-      oldPrice: 100,
-      newPrice: 90,
-    });
-    expect(summary.alertsSent).toBe(1);
-  });
-
-  it("does not alert or write history when nothing changed", async () => {
-    const store = fakeStore([product()]);
+  it("does not alert or record a change when nothing changed", async () => {
+    const store = fakeStore([item()]);
     await runPriceCheck({ scrape: async () => scraped(100) }, store, { sleep: noSleep });
-    expect(store.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), false);
+    expect(store.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: false, confirmed: false });
+    expect(store.trackersOf).not.toHaveBeenCalled();
+  });
+
+  it("rejects an implausible misread instead of recording it", async () => {
+    const store = fakeStore([item({ current_price: 2510, original_price: 5995, lowest_price: 2510 })]);
+    const summary = await runPriceCheck({ scrape: async () => scraped(25, { originalPrice: 5995 }) }, store, { sleep: noSleep });
+
+    expect(summary.rejected).toBe(1);
+    expect(store.saveResult).not.toHaveBeenCalled();
     expect(store.deliverAlert).not.toHaveBeenCalled();
   });
 
+  it("holds a huge drop until the next reading confirms it, then alerts", async () => {
+    const first = fakeStore([item({ original_price: null })]);
+    await runPriceCheck({ scrape: async () => scraped(30, { originalPrice: null }) }, first, { sleep: noSleep });
+    expect(first.saveHeld).toHaveBeenCalledTimes(1);
+    expect(first.deliverAlert).not.toHaveBeenCalled();
+
+    const second = fakeStore([item({ original_price: null, pending_price: 30 })]);
+    const summary = await runPriceCheck({ scrape: async () => scraped(30, { originalPrice: null }) }, second, { sleep: noSleep });
+    expect(second.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: true, confirmed: true });
+    expect(summary.alertsSent).toBe(1);
+  });
+
+  it("counts pages that needed Firecrawl credits", async () => {
+    const store = fakeStore([item(), item({ url: "https://shop.test/b" })]);
+    let n = 0;
+    const summary = await runPriceCheck(
+      { scrape: async () => scraped(100, { via: n++ === 0 ? "direct" : "firecrawl" }) },
+      store,
+      { sleep: noSleep }
+    );
+    expect(summary.firecrawlFetches).toBe(1);
+  });
+
   it("records failures and pauses after too many", async () => {
-    const products = [
-      product({ fail_count: 0 }),
-      product({ fail_count: MAX_FAILURES - 1, url: "https://shop.test/z" }),
-    ];
-    const store = fakeStore(products);
+    const store = fakeStore([item({ fail_count: 0 }), item({ fail_count: MAX_FAILURES - 1, url: "https://shop.test/z" })]);
     const scraper: Scraper = {
       scrape: async () => {
         throw new Error("blocked");
       },
     };
-
     const summary = await runPriceCheck(scraper, store, { retries: 0, sleep: noSleep });
-
     expect(summary.failures).toBe(2);
     expect(store.saveFailure.mock.calls.map(([, , pause]) => pause)).toEqual([false, true]);
   });
 
-  it("stops scheduling new URLs once the time budget is spent", async () => {
-    const products = ["a", "b", "c"].map((u) => product({ url: `https://shop.test/${u}` }));
+  it("stops scheduling new items once the time budget is spent", async () => {
+    const items = ["a", "b", "c"].map((u) => item({ url: `https://shop.test/${u}` }));
     let clock = 0;
     const scraper: Scraper = {
       scrape: async () => {
@@ -175,15 +169,13 @@ describe("runPriceCheck", () => {
         return scraped(100);
       },
     };
-
-    const summary = await runPriceCheck(scraper, fakeStore(products), {
+    const summary = await runPriceCheck(scraper, fakeStore(items), {
       concurrency: 1,
       budgetMs: 1500,
       now: () => clock,
       sleep: noSleep,
     });
-
-    expect(summary.urlsScraped).toBe(2);
+    expect(summary.itemsChecked).toBe(2);
     expect(summary.skippedForTime).toBe(1);
   });
 });

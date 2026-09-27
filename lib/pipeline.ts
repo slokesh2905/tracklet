@@ -1,54 +1,60 @@
-import type { AlertKind, ProductRow } from "@/lib/db/schema";
+import type { AlertKind, CatalogItemRow, TrackingRow } from "@/lib/db/schema";
 import { evaluateAlert } from "@/lib/alerts";
+import { guardPrice } from "@/lib/price-guard";
 import type { ScrapedProduct, Scraper } from "@/lib/scraper";
 
-/** After this many consecutive failures a product stops being auto-checked. */
+/** After this many consecutive failures an item stops being auto-checked. */
 export const MAX_FAILURES = 5;
 
-export type PipelineProduct = Pick<
-  ProductRow,
+export type PipelineItem = Pick<
+  CatalogItemRow,
   | "id"
-  | "user_id"
   | "url"
   | "name"
   | "current_price"
+  | "original_price"
   | "currency"
   | "image_url"
   | "in_stock"
-  | "target_price"
-  | "alert_pct"
   | "lowest_price"
+  | "pending_price"
   | "fail_count"
 >;
 
+export type Tracker = Pick<TrackingRow, "id" | "user_id" | "target_price" | "alert_pct">;
+
 export type AlertEvent = {
   kind: AlertKind;
-  product: PipelineProduct;
+  item: PipelineItem;
+  tracker: Tracker;
   oldPrice: number;
   newPrice: number;
   currency: string;
 };
 
 export interface PipelineStore {
-  /** Unpaused products, least recently checked first. */
-  dueProducts(limit: number): Promise<PipelineProduct[]>;
-  /** Persist a successful scrape; write history only when `priceChanged`. */
-  saveResult(
-    product: PipelineProduct,
-    scraped: ScrapedProduct,
-    priceChanged: boolean
-  ): Promise<void>;
-  saveFailure(product: PipelineProduct, message: string, pause: boolean): Promise<void>;
-  /** Deliver an alert; returns the channels it reached (and logs it). */
+  /** Unpaused catalog items, least recently checked first. */
+  dueItems(limit: number): Promise<PipelineItem[]>;
+  /** Commit an accepted reading; write history when price or stock changed. Clears any pending price. */
+  saveResult(item: PipelineItem, scraped: ScrapedProduct, opts: { priceChanged: boolean; confirmed: boolean }): Promise<void>;
+  /** Park a surprising reading until the next check confirms it. */
+  saveHeld(item: PipelineItem, scraped: ScrapedProduct): Promise<void>;
+  saveFailure(item: PipelineItem, message: string, pause: boolean): Promise<void>;
+  /** Everyone tracking this item, with their own alert rules. */
+  trackersOf(itemId: string): Promise<Tracker[]>;
+  /** Deliver an alert to one tracker; returns the channels it reached (and logs it). */
   deliverAlert(event: AlertEvent): Promise<string[]>;
 }
 
 export type RunSummary = {
-  productsChecked: number;
-  urlsScraped: number;
+  itemsChecked: number;
   priceChanges: number;
+  held: number;
+  rejected: number;
   alertsSent: number;
   failures: number;
+  /** Pages that needed Firecrawl (1 credit each); the rest were fetched for free. */
+  firecrawlFetches: number;
   skippedForTime: number;
 };
 
@@ -61,16 +67,6 @@ export type RunOptions = {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 };
-
-export function groupByUrl<T extends { url: string }>(items: T[]) {
-  const groups = new Map<string, T[]>();
-  for (const item of items) {
-    const group = groups.get(item.url);
-    if (group) group.push(item);
-    else groups.set(item.url, [item]);
-  }
-  return groups;
-}
 
 /** Run `fn` over items with at most `limit` in flight. `shouldStart` can stop early. */
 export async function mapWithConcurrency<T, R>(
@@ -112,8 +108,9 @@ export async function withRetry<T>(
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * One cron tick: scrape each distinct URL once, fan the result out to every
- * product row tracking it, record history, and fire alerts.
+ * One cron tick. Each catalog item is read once however many users track it;
+ * the price guard decides whether the reading counts; alerts fan out to every
+ * tracker, each evaluated against their own rules.
  */
 export async function runPriceCheck(
   scraper: Scraper,
@@ -128,66 +125,35 @@ export async function runPriceCheck(
   }: RunOptions = {}
 ): Promise<RunSummary> {
   const startedAt = now();
-  const products = await store.dueProducts(batchSize);
-  const groups = [...groupByUrl(products).entries()];
+  const items = await store.dueItems(batchSize);
 
   const summary: RunSummary = {
-    productsChecked: 0,
-    urlsScraped: 0,
+    itemsChecked: 0,
     priceChanges: 0,
+    held: 0,
+    rejected: 0,
     alertsSent: 0,
     failures: 0,
+    firecrawlFetches: 0,
     skippedForTime: 0,
   };
 
   const started = await mapWithConcurrency(
-    groups,
+    items,
     concurrency,
-    async ([url, rows]) => {
+    async (item) => {
       let scraped: ScrapedProduct;
       try {
-        scraped = await withRetry(() => scraper.scrape(url), { retries, sleep });
-        summary.urlsScraped++;
+        scraped = await withRetry(() => scraper.scrape(item.url), { retries, sleep });
       } catch (error) {
+        summary.failures++;
         const message = error instanceof Error ? error.message : "Scrape failed";
-        for (const row of rows) {
-          summary.failures++;
-          await store.saveFailure(row, message, row.fail_count + 1 >= MAX_FAILURES);
-        }
+        await store.saveFailure(item, message, item.fail_count + 1 >= MAX_FAILURES);
         return true;
       }
-
-      for (const row of rows) {
-        summary.productsChecked++;
-        const oldPrice = Number(row.current_price);
-        const priceChanged = oldPrice !== scraped.price;
-        const stockChanged = row.in_stock !== scraped.inStock;
-
-        await store.saveResult(row, scraped, priceChanged);
-        if (priceChanged) summary.priceChanges++;
-        if (!priceChanged && !stockChanged) continue;
-
-        const kind = evaluateAlert({
-          oldPrice,
-          newPrice: scraped.price,
-          wasInStock: row.in_stock,
-          inStock: scraped.inStock,
-          targetPrice: row.target_price === null ? null : Number(row.target_price),
-          alertPct: row.alert_pct === null ? null : Number(row.alert_pct),
-          previousLow: row.lowest_price === null ? null : Number(row.lowest_price),
-        });
-
-        if (kind) {
-          const channels = await store.deliverAlert({
-            kind,
-            product: row,
-            oldPrice,
-            newPrice: scraped.price,
-            currency: scraped.currency,
-          });
-          if (channels.length > 0) summary.alertsSent++;
-        }
-      }
+      summary.itemsChecked++;
+      if (scraped.via === "firecrawl") summary.firecrawlFetches++;
+      await processReading(item, scraped, store, summary);
       return true;
     },
     () => now() - startedAt < budgetMs
@@ -195,4 +161,60 @@ export async function runPriceCheck(
 
   summary.skippedForTime = started.filter((r) => r === undefined).length;
   return summary;
+}
+
+export type ReadingOutcome = "rejected" | "held" | "unchanged" | "changed";
+
+/**
+ * Apply one fresh reading to a catalog item: guard it, persist it, and alert
+ * every tracker when the price or stock changed. Shared by the cron and by
+ * a user's manual "Check now", so both follow exactly the same rules.
+ */
+export async function processReading(
+  item: PipelineItem,
+  scraped: ScrapedProduct,
+  store: Omit<PipelineStore, "dueItems">,
+  summary?: Pick<RunSummary, "priceChanges" | "held" | "rejected" | "alertsSent">
+): Promise<{ outcome: ReadingOutcome; reason?: string }> {
+  const decision = guardPrice({
+    price: scraped.price,
+    originalPrice: scraped.originalPrice ?? item.original_price,
+    method: scraped.method ?? "jsonld",
+    lastConfirmed: item.current_price,
+    pending: item.pending_price,
+  });
+
+  if (decision.action === "reject") {
+    if (summary) summary.rejected++;
+    await store.saveFailure(item, `Ignored an implausible reading: ${decision.reason}`, false);
+    return { outcome: "rejected", reason: decision.reason };
+  }
+  if (decision.action === "hold") {
+    if (summary) summary.held++;
+    await store.saveHeld(item, scraped);
+    return { outcome: "held", reason: decision.reason };
+  }
+
+  const oldPrice = item.current_price;
+  const priceChanged = oldPrice !== scraped.price;
+  const stockChanged = item.in_stock !== scraped.inStock;
+  await store.saveResult(item, scraped, { priceChanged, confirmed: decision.confirmed });
+  if (priceChanged && summary) summary.priceChanges++;
+  if (!priceChanged && !stockChanged) return { outcome: "unchanged" };
+
+  for (const tracker of await store.trackersOf(item.id)) {
+    const kind = evaluateAlert({
+      oldPrice,
+      newPrice: scraped.price,
+      wasInStock: item.in_stock,
+      inStock: scraped.inStock,
+      targetPrice: tracker.target_price,
+      alertPct: tracker.alert_pct,
+      previousLow: item.lowest_price,
+    });
+    if (!kind) continue;
+    const channels = await store.deliverAlert({ kind, item, tracker, oldPrice, newPrice: scraped.price, currency: scraped.currency });
+    if (channels.length > 0 && summary) summary.alertsSent++;
+  }
+  return { outcome: "changed" };
 }
