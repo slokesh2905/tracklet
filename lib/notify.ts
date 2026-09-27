@@ -1,46 +1,11 @@
 import "server-only";
-import { createElement, type ReactElement } from "react";
-import { Resend } from "resend";
+import { createElement } from "react";
 import type { AlertKind } from "@/lib/db/schema";
 import { ALERT_COPY } from "@/lib/alerts";
-import { env, serverEnv } from "@/lib/env";
+import { env } from "@/lib/env";
 import { formatPercent, formatPrice, percentChange } from "@/lib/format";
 import PriceAlertEmail from "@/emails/PriceAlertEmail";
-
-let resend: Resend | null = null;
-
-/**
- * Send an email through Resend. Two non-production escape hatches:
- * - EMAIL_OUTBOX_FILE: append the message as a JSON line instead (E2E tests read it).
- *   Ignored on Vercel, so a stray variable can never swallow real emails.
- * - No RESEND_API_KEY in development: log it, so sign-in links still work locally.
- */
-export async function sendEmail(
-  to: string,
-  subject: string,
-  react: ReactElement,
-  meta: Record<string, string> = {}
-) {
-  const outbox = process.env.EMAIL_OUTBOX_FILE;
-  if (outbox && !process.env.VERCEL) {
-    const { appendFile } = await import("node:fs/promises");
-    await appendFile(outbox, JSON.stringify({ to, subject, meta, at: Date.now() }) + "\n");
-    return;
-  }
-  if (!process.env.RESEND_API_KEY && process.env.NODE_ENV === "development") {
-    console.info(`[email] to=${to} subject="${subject}"`, meta);
-    return;
-  }
-
-  resend ??= new Resend(serverEnv("RESEND_API_KEY"));
-  const { error } = await resend.emails.send({
-    from: serverEnv("RESEND_FROM_EMAIL"),
-    to,
-    subject,
-    react,
-  });
-  if (error) throw new Error(`Resend: ${error.message}`);
-}
+import { sendEmail } from "@/lib/mailer";
 
 type DiscordEmbed = {
   title: string;
@@ -85,20 +50,18 @@ export async function deliverAlert(
 ): Promise<string[]> {
   const copy = ALERT_COPY[message.kind];
   const detailUrl = `${env.NEXT_PUBLIC_APP_URL}/products/${message.productId}`;
+  const settingsUrl = `${env.NEXT_PUBLIC_APP_URL}/settings`;
   const delivered: string[] = [];
   const jobs: Array<Promise<void>> = [];
 
   if (recipient.emailAlerts && recipient.email) {
     jobs.push(
-      sendEmail(
-        recipient.email,
-        `${copy.emoji} ${copy.title}: ${message.productName.slice(0, 80)}`,
-        createElement(PriceAlertEmail, {
-          ...message,
-          detailUrl,
-          settingsUrl: `${env.NEXT_PUBLIC_APP_URL}/settings`,
-        })
-      ).then(() => void delivered.push("email"))
+      sendEmail({
+        to: recipient.email,
+        subject: `${copy.emoji} ${copy.title}: ${message.productName.slice(0, 80)}`,
+        react: createElement(PriceAlertEmail, { ...message, detailUrl, settingsUrl }),
+        unsubscribeUrl: settingsUrl,
+      }).then(() => void delivered.push("email"))
     );
   }
 
