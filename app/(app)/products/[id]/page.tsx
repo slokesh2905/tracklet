@@ -127,7 +127,9 @@ export default async function ProductPage({ params }: Params) {
         </div>
 
         <aside className="flex min-w-0 flex-col gap-4">
-          <AiVerdictCard productId={product.id} verdict={verdict} stale={staleVerdict} enabled={isAiEnabled()} />
+          {isAiEnabled() && (
+            <AiVerdictCard productId={product.id} verdict={verdict} stale={staleVerdict} enabled />
+          )}
           <Section title="Price alert">
             <AlertRulesForm
               productId={product.id}

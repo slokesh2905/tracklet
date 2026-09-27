@@ -14,6 +14,7 @@ import { db } from "@/lib/db";
 import { priceHistory, productInsights, products } from "@/lib/db/schema";
 import { serverEnv } from "@/lib/env";
 import { computeInsights } from "@/lib/insights";
+import { aiModelId } from "@/lib/ai-provider";
 import { consumeAiQuota, ownsCollection } from "@/lib/ownership";
 import { createFirecrawlScraper, ScrapeError, type ScrapedProduct } from "@/lib/scraper";
 import { getUser } from "@/lib/session";
@@ -284,7 +285,7 @@ export async function generateVerdict(productId: string): Promise<ActionResult> 
       summary: verdict.summary,
       reasons: verdict.reasons,
       price_at_generation: product.current_price,
-      model: serverEnv("AI_MODEL"),
+      model: aiModelId(),
       generated_at: new Date().toISOString(),
     };
     await db

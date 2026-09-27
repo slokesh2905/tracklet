@@ -25,7 +25,6 @@ export const env = z
 const serverSchema = z.object({
   FIRECRAWL_API_KEY: z.string().min(1),
   CRON_SECRET: z.string().min(16),
-  AI_MODEL: z.string().default("anthropic/claude-haiku-4.5"),
   AI_DAILY_LIMIT: z.coerce.number().int().positive().default(20),
 });
 
