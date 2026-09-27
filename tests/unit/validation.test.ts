@@ -126,3 +126,13 @@ describe("toScrapedProduct", () => {
     expect(toScrapedProduct(null)).toBeNull();
   });
 });
+
+describe("withStrictSsl", () => {
+  it("upgrades lenient sslmodes to verify-full and leaves others alone", async () => {
+    const { withStrictSsl } = await import("@/lib/db/url");
+    expect(withStrictSsl("postgres://u:p@ep-x.neon.tech/db?sslmode=require&channel_binding=require")).toBe(
+      "postgres://u:p@ep-x.neon.tech/db?sslmode=verify-full&channel_binding=require"
+    );
+    expect(withStrictSsl("postgres://u:p@localhost:5433/db")).toBe("postgres://u:p@localhost:5433/db");
+  });
+});

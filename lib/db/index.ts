@@ -3,6 +3,7 @@ import { attachDatabasePool } from "@vercel/functions";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "@/lib/db/schema";
+import { withStrictSsl } from "@/lib/db/url";
 
 export type Db = NodePgDatabase<typeof schema>;
 
@@ -16,7 +17,7 @@ function createDb(): Db {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("Missing environment variable DATABASE_URL");
 
-  const pool = new Pool({ connectionString, max: 5, idleTimeoutMillis: 10_000 });
+  const pool = new Pool({ connectionString: withStrictSsl(connectionString), max: 5, idleTimeoutMillis: 10_000 });
   attachDatabasePool(pool);
   return drizzle(pool, { schema });
 }
