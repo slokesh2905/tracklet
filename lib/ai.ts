@@ -2,7 +2,7 @@ import "server-only";
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import type { Verdict } from "@/lib/db/schema";
-import { serverEnv } from "@/lib/env";
+import { getModel, pickAiProvider } from "@/lib/ai-provider";
 import { formatPrice } from "@/lib/format";
 import type { Insights } from "@/lib/insights";
 import { toScrapedProduct, type ScrapedProduct } from "@/lib/scraper";
@@ -23,12 +23,10 @@ export const CATEGORIES = [
   "Other",
 ] as const;
 
-/** AI runs through Vercel AI Gateway: an API key locally, OIDC when deployed on Vercel. */
+/** True when a model backend is configured (see lib/ai-provider.ts). */
 export function isAiEnabled() {
-  return Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN);
+  return pickAiProvider() !== null;
 }
-
-const model = () => serverEnv("AI_MODEL");
 
 export const verdictSchema = z.object({
   verdict: z
@@ -70,7 +68,7 @@ export async function generateDealVerdict(input: {
   ].join("\n");
 
   const { output } = await generateText({
-    model: model(),
+    model: getModel(),
     output: Output.object({ schema: verdictSchema }),
     system:
       "You are a careful shopping assistant. Judge whether now is a good time to buy using only the statistics given. " +
@@ -85,7 +83,7 @@ export async function generateDealVerdict(input: {
 
 export async function categorizeProduct(name: string) {
   const { output } = await generateText({
-    model: model(),
+    model: getModel(),
     output: Output.choice({ options: [...CATEGORIES] }),
     prompt: `Which store category best fits this product? "${name.slice(0, 200)}"`,
     temperature: 0,
@@ -99,7 +97,7 @@ export async function extractProductFromMarkdown(
   markdown: string
 ): Promise<ScrapedProduct | null> {
   const { output } = await generateText({
-    model: model(),
+    model: getModel(),
     output: Output.object({
       schema: z.object({
         found: z.boolean().describe("false if this page is not a single product page"),

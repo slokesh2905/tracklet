@@ -19,6 +19,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.57",
     "@mendable/firecrawl-js": "^4.41.0",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.1.0",

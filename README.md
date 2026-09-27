@@ -35,7 +35,7 @@ Track prices from any online store, see an honest price history, and get alerted
 - **Track any store.** Paste a link (or 20 at once). Firecrawl extracts name, price, currency, stock and list price, with an LLM fallback when structured extraction fails.
 - **Smart alerts.** Set a target price or a minimum % drop. You're alerted when the price *crosses* the target, when it hits a new all-time low, or when an item is back in stock. Delivery by email (React Email via Gmail SMTP, or Resend) and Discord webhook, plus a weekly digest.
 - **Honest price insights.** Step-function charts with 7D/30D/90D/All ranges, time-weighted averages, 30/90-day ranges, a regression trend, and a **0–100 deal score**.
-- **AI "buy now or wait?" verdict.** Structured output from the Vercel AI SDK, grounded only in computed statistics, cached per price and rate-limited per user in Postgres.
+- **AI "buy now or wait?" verdict.** Structured output from the Vercel AI SDK running NVIDIA Nemotron (free API) or any AI Gateway model, grounded only in computed statistics, cached per price and rate-limited per user in Postgres.
 - **Collections & sharing.** Group products into wishlists. Public product and collection pages are cached with ISR and get generated Open Graph images.
 - **Multi-currency.** Totals convert into your preferred currency using daily ECB rates.
 - **Mobile-first PWA.** Installable, with a bottom tab bar, bottom-sheet dialogs, 44px touch targets and safe-area insets. E2E tests fail on horizontal overflow at every viewport.
@@ -74,7 +74,7 @@ flowchart LR
 
 ## Tech stack
 
-Next.js 16 (App Router, Server Actions, ISR, `next/og`) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui · Recharts · Neon Postgres · Drizzle ORM · Better Auth · Firecrawl · Vercel AI SDK 7 + AI Gateway · React Email + Nodemailer (Gmail) / Resend · Zod · Vitest · Playwright · Vercel (Cron, Fluid Compute)
+Next.js 16 (App Router, Server Actions, ISR, `next/og`) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui · Recharts · Neon Postgres · Drizzle ORM · Better Auth · Firecrawl · Vercel AI SDK 7 (NVIDIA Nemotron / AI Gateway) · React Email + Nodemailer (Gmail) / Resend · Zod · Vitest · Playwright · Vercel (Cron, Fluid Compute)
 
 ## Data model
 
@@ -107,7 +107,7 @@ Sign in as `demo@tracklet.dev`. With no email provider configured, the magic lin
 
 `.env.development.local` takes priority over `.env.local` during `next dev`, so local work never touches the production database that `vercel env pull` writes into `.env.local`.
 
-To add real products you need a [Firecrawl](https://firecrawl.dev) key. Email (alerts and magic links) goes through Gmail with an [app password](https://myaccount.google.com/apppasswords), which is free with no domain needed, or through Resend if you have a verified domain. AI features need an [AI Gateway](https://vercel.com/ai-gateway) key locally; on Vercel they use OIDC automatically.
+To add real products you need a [Firecrawl](https://firecrawl.dev) key. Email (alerts and magic links) goes through Gmail with an [app password](https://myaccount.google.com/apppasswords), which is free with no domain needed, or through Resend if you have a verified domain. AI features use a free [NVIDIA API](https://build.nvidia.com) key (`NVIDIA_API_KEY`) or an AI Gateway key, and are hidden when neither is set.
 
 ### Tests
 
