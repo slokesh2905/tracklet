@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { collections, priceHistory, products } from "@/lib/db/schema";
+import { catalogItems, collections, priceHistory, products } from "@/lib/db/schema";
 
 // Public share pages. Only the whitelisted columns below ever leave the server,
 // and only for rows the owner made public (directly or via a public collection).
@@ -13,19 +13,20 @@ export async function getSharedProduct(slug: string) {
 
   const [row] = await db
     .select({
-      id: products.id,
-      name: products.name,
-      url: products.url,
-      image_url: products.image_url,
-      current_price: products.current_price,
-      original_price: products.original_price,
-      currency: products.currency,
-      in_stock: products.in_stock,
-      lowest_price: products.lowest_price,
-      highest_price: products.highest_price,
+      itemId: catalogItems.id,
+      name: catalogItems.name,
+      url: catalogItems.url,
+      image_url: catalogItems.image_url,
+      current_price: catalogItems.current_price,
+      original_price: catalogItems.original_price,
+      currency: catalogItems.currency,
+      in_stock: catalogItems.in_stock,
+      lowest_price: catalogItems.lowest_price,
+      highest_price: catalogItems.highest_price,
       created_at: products.created_at,
     })
     .from(products)
+    .innerJoin(catalogItems, eq(catalogItems.id, products.catalog_item_id))
     .leftJoin(collections, eq(collections.id, products.collection_id))
     .where(and(eq(products.share_slug, slug), or(eq(products.is_public, true), eq(collections.is_public, true))));
   if (!row) return null;
@@ -33,10 +34,10 @@ export async function getSharedProduct(slug: string) {
   const history = await db
     .select({ price: priceHistory.price, checked_at: priceHistory.checked_at })
     .from(priceHistory)
-    .where(eq(priceHistory.product_id, row.id))
+    .where(eq(priceHistory.catalog_item_id, row.itemId))
     .orderBy(asc(priceHistory.checked_at));
 
-  const { id: _id, ...product } = row;
+  const { itemId: _id, ...product } = row;
   return { ...product, history };
 }
 
@@ -50,19 +51,27 @@ export async function getSharedCollection(slug: string) {
     where: and(eq(collections.share_slug, slug), eq(collections.is_public, true)),
     with: {
       products: {
-        columns: {
-          name: true,
-          url: true,
-          image_url: true,
-          current_price: true,
-          currency: true,
-          lowest_price: true,
-          highest_price: true,
-          share_slug: true,
-        },
+        columns: { share_slug: true },
         orderBy: desc(products.created_at),
+        with: {
+          item: {
+            columns: {
+              name: true,
+              url: true,
+              image_url: true,
+              current_price: true,
+              currency: true,
+              lowest_price: true,
+              highest_price: true,
+            },
+          },
+        },
       },
     },
   });
-  return collection ?? null;
+  if (!collection) return null;
+  return {
+    name: collection.name,
+    products: collection.products.map((p) => ({ share_slug: p.share_slug, ...p.item })),
+  };
 }

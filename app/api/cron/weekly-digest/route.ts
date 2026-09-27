@@ -23,9 +23,14 @@ export async function GET(request: Request) {
 
   const [rows, optedOut] = await Promise.all([
     db.query.products.findMany({
-      columns: { id: true, user_id: true, name: true, current_price: true, currency: true },
+      columns: { id: true, user_id: true },
       orderBy: desc(products.created_at),
-      with: { priceHistory: { columns: { price: true, checked_at: true } } },
+      with: {
+        item: {
+          columns: { name: true, current_price: true, currency: true },
+          with: { priceHistory: { columns: { price: true, checked_at: true } } },
+        },
+      },
     }),
     db.select({ user_id: userSettings.user_id }).from(userSettings).where(eq(userSettings.weekly_digest, false)),
   ]);
@@ -33,23 +38,23 @@ export async function GET(request: Request) {
   const skip = new Set(optedOut.map((s) => s.user_id));
   const byUser = new Map<string, DigestItem[]>();
 
-  for (const p of rows) {
-    if (skip.has(p.user_id)) continue;
+  for (const { item: p, id, user_id } of rows) {
+    if (skip.has(user_id)) continue;
     const history = [...p.priceHistory].sort((a, b) => a.checked_at.localeCompare(b.checked_at));
     const insights = computeInsights(history, p.current_price, now);
     // Price in effect a week ago = last history point at or before then.
     const before = history.filter((h) => new Date(h.checked_at).getTime() <= weekAgo).at(-1);
 
-    const items = byUser.get(p.user_id) ?? [];
+    const items = byUser.get(user_id) ?? [];
     items.push({
       name: p.name,
-      detailUrl: `${env.NEXT_PUBLIC_APP_URL}/products/${p.id}`,
+      detailUrl: `${env.NEXT_PUBLIC_APP_URL}/products/${id}`,
       currentPrice: p.current_price,
       currency: p.currency,
       weekChangePct: before ? percentChange(before.price, p.current_price) : 0,
       dealLabel: insights.dealLabel,
     });
-    byUser.set(p.user_id, items);
+    byUser.set(user_id, items);
   }
 
   let sent = 0;

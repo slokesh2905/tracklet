@@ -3,10 +3,9 @@ import { eq } from "drizzle-orm";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { db } from "@/lib/db";
 import { checkRuns } from "@/lib/db/schema";
-import { serverEnv } from "@/lib/env";
 import { runPriceCheck } from "@/lib/pipeline";
 import { createDbPipelineStore } from "@/lib/pipeline-store";
-import { createFirecrawlScraper } from "@/lib/scraper";
+import { makeScraper } from "@/lib/reader";
 
 export const maxDuration = 300;
 
@@ -19,12 +18,10 @@ export async function GET(request: Request) {
   const [run] = await db.insert(checkRuns).values({}).returning({ id: checkRuns.id });
 
   try {
-    const summary = await runPriceCheck(
-      createFirecrawlScraper(serverEnv("FIRECRAWL_API_KEY")),
-      createDbPipelineStore(),
+    const summary = await runPriceCheck(makeScraper(), createDbPipelineStore(), {
       // Leave headroom under maxDuration for in-flight scrapes to finish.
-      { budgetMs: 240_000 }
-    );
+      budgetMs: 240_000,
+    });
 
     if (run) {
       await db
@@ -32,11 +29,14 @@ export async function GET(request: Request) {
         .set({
           finished_at: new Date().toISOString(),
           duration_ms: Date.now() - started,
-          products_checked: summary.productsChecked,
-          urls_scraped: summary.urlsScraped,
+          products_checked: summary.itemsChecked,
+          urls_scraped: summary.itemsChecked,
           price_changes: summary.priceChanges,
           alerts_sent: summary.alertsSent,
           failures: summary.failures,
+          held: summary.held,
+          rejected: summary.rejected,
+          firecrawl_fetches: summary.firecrawlFetches,
         })
         .where(eq(checkRuns.id, run.id));
     }

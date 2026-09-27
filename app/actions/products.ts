@@ -2,68 +2,70 @@
 
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
-import { and, asc, desc, eq, gte } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { fail, type ActionResult } from "@/lib/action-result";
-import {
-  categorizeProduct,
-  extractProductFromMarkdown,
-  generateDealVerdict,
-  isAiEnabled,
-} from "@/lib/ai";
-import { db } from "@/lib/db";
-import { priceHistory, productInsights, products } from "@/lib/db/schema";
-import { serverEnv } from "@/lib/env";
-import { computeInsights } from "@/lib/insights";
+import { categorizeProduct, generateDealVerdict, isAiEnabled } from "@/lib/ai";
 import { aiModelId } from "@/lib/ai-provider";
+import { createItem, findItemByKey, rekeyItem } from "@/lib/catalog";
+import { MANUAL_COMPARE_MIN_MS, runComparison } from "@/lib/comparison-runner";
+import { toStoreOffers } from "@/lib/data";
+import { db } from "@/lib/db";
+import { catalogItems, itemInsights, priceHistory, products, type CatalogItemRow } from "@/lib/db/schema";
+import { serverEnv } from "@/lib/env";
+import { buildEvidence, gateVerdict } from "@/lib/evidence";
+import { computeInsights } from "@/lib/insights";
 import { consumeAiQuota, ownsCollection } from "@/lib/ownership";
-import { createFirecrawlScraper, ScrapeError, type ScrapedProduct } from "@/lib/scraper";
+import { processReading, type PipelineItem } from "@/lib/pipeline";
+import { createDbPipelineStore, loadPipelineItem } from "@/lib/pipeline-store";
+import { guardPrice } from "@/lib/price-guard";
+import { productKeyFromUrl, resolveUrl } from "@/lib/product-key";
+import { makeScraper } from "@/lib/reader";
 import { getUser } from "@/lib/session";
 import { alertRulesSchema, firstIssue, productUrlSchema, uuidSchema } from "@/lib/validation";
 
-/** A scrape of the same URL by anyone within this window is reused instead of re-fetched. */
-const FRESH_SCRAPE_MS = 6 * 60 * 60 * 1000;
+/** A catalog item checked this recently is attached as-is: no fetch, no credits. */
+const FRESH_MS = 6 * 60 * 60 * 1000;
+/** "Check now" re-reads an item at most this often (shared by everyone tracking it). */
+const MANUAL_CHECK_MIN_MS = 60 * 60 * 1000;
 
 function revalidateApp() {
   revalidatePath("/dashboard");
   revalidatePath("/collections");
 }
 
-/** Scopes a product query to its owner; every write below goes through this. */
-const owned = (productId: string, userId: string) =>
-  and(eq(products.id, productId), eq(products.user_id, userId));
+/** Scopes a tracking row to its owner; every write below goes through this. */
+const owned = (productId: string, userId: string) => and(eq(products.id, productId), eq(products.user_id, userId));
 
-async function scrapeWithFallback(url: string): Promise<ScrapedProduct> {
-  const scraper = createFirecrawlScraper(serverEnv("FIRECRAWL_API_KEY"));
-  try {
-    return await scraper.scrape(url);
-  } catch (error) {
-    if (error instanceof ScrapeError && error.markdown && isAiEnabled()) {
-      const product = await extractProductFromMarkdown(url, error.markdown).catch(() => null);
-      if (product) return product;
+const isFresh = (item: Pick<CatalogItemRow, "last_checked_at">, ms: number) =>
+  Boolean(item.last_checked_at) && Date.now() - new Date(item.last_checked_at!).getTime() < ms;
+
+const toPipelineItem = (i: CatalogItemRow): PipelineItem => ({
+  id: i.id,
+  url: i.url,
+  name: i.name,
+  current_price: i.current_price,
+  original_price: i.original_price,
+  currency: i.currency,
+  image_url: i.image_url,
+  in_stock: i.in_stock,
+  lowest_price: i.lowest_price,
+  pending_price: i.pending_price,
+  fail_count: i.fail_count,
+});
+
+/** Background work after a new catalog item appears: category + cross-store prices. */
+function enrichInBackground(item: CatalogItemRow) {
+  after(async () => {
+    if (!item.category && isAiEnabled()) {
+      try {
+        const category = await categorizeProduct(item.name);
+        await db.update(catalogItems).set({ category }).where(eq(catalogItems.id, item.id));
+      } catch (err) {
+        console.error("Categorize failed:", err);
+      }
     }
-    throw error;
-  }
-}
-
-/** Reuse a recent scrape of this exact URL (any user) to save a paid scrape call. Only price data is read. */
-async function findFreshScrape(url: string): Promise<ScrapedProduct | null> {
-  const row = await db.query.products.findFirst({
-    columns: { name: true, current_price: true, currency: true, image_url: true, in_stock: true, original_price: true },
-    where: and(
-      eq(products.url, url),
-      gte(products.last_checked_at, new Date(Date.now() - FRESH_SCRAPE_MS).toISOString())
-    ),
-    orderBy: desc(products.last_checked_at),
+    await runComparison(item);
   });
-  if (!row) return null;
-  return {
-    name: row.name,
-    price: row.current_price,
-    currency: row.currency,
-    imageUrl: row.image_url,
-    inStock: row.in_stock,
-    originalPrice: row.original_price,
-  };
 }
 
 export async function addProduct(
@@ -72,80 +74,72 @@ export async function addProduct(
 ): Promise<ActionResult<{ productId: string; updated: boolean }>> {
   const parsed = productUrlSchema.safeParse(rawUrl);
   if (!parsed.success) return fail(firstIssue(parsed.error));
-  const url = parsed.data;
 
   const user = await getUser();
   if (!user) return fail("Please sign in first");
   if (collectionId && !(await ownsCollection(user.id, collectionId))) return fail("Collection not found");
 
-  let scraped: ScrapedProduct;
-  try {
-    scraped = (await findFreshScrape(url)) ?? (await scrapeWithFallback(url));
-  } catch (error) {
-    return fail(error instanceof Error ? error.message : "Couldn't read that page");
-  }
+  // Share links (dl.flipkart.com/s/…, amzn.in/…) resolve to the product they point at.
+  const resolved = await resolveUrl(parsed.data);
+  let item = await findItemByKey(productKeyFromUrl(resolved).key);
+  let created = false;
 
-  const existing = await db.query.products.findFirst({
-    columns: { id: true, current_price: true, in_stock: true },
-    where: and(eq(products.user_id, user.id), eq(products.url, url)),
-  });
+  if (!item || !isFresh(item, FRESH_MS)) {
+    let scraped;
+    try {
+      scraped = await makeScraper().scrape(resolved);
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : "Couldn't read that page");
+    }
+    // The page itself may reveal a more precise identity (final URL after redirects, SKU).
+    const key = productKeyFromUrl(scraped.finalUrl ?? resolved, scraped.sku);
+    item ??= await findItemByKey(key.key);
 
-  const fields = {
-    name: scraped.name,
-    current_price: scraped.price,
-    original_price: scraped.originalPrice,
-    currency: scraped.currency,
-    image_url: scraped.imageUrl,
-    in_stock: scraped.inStock,
-    last_checked_at: new Date().toISOString(),
-    last_error: null,
-    fail_count: 0,
-    paused: false,
-    ...(collectionId ? { collection_id: collectionId } : {}),
-  };
-
-  let productId: string;
-  try {
-    const [row] = await db
-      .insert(products)
-      .values({ user_id: user.id, url, ...fields })
-      .onConflictDoUpdate({ target: [products.user_id, products.url], set: fields })
-      .returning({ id: products.id });
-    productId = row!.id;
-  } catch (error) {
-    console.error("addProduct upsert failed:", error);
-    return fail("Couldn't save that product. Please try again.");
-  }
-
-  const changed =
-    !existing || existing.current_price !== scraped.price || existing.in_stock !== scraped.inStock;
-  if (changed) {
-    await db.insert(priceHistory).values({
-      product_id: productId,
-      price: scraped.price,
-      currency: scraped.currency,
-      in_stock: scraped.inStock,
-    });
-  }
-
-  // Categorise after the response is sent; the user never waits on the model.
-  if (!existing && isAiEnabled()) {
-    after(async () => {
-      try {
-        const category = await categorizeProduct(scraped.name);
-        await db.update(products).set({ category }).where(eq(products.id, productId));
-      } catch (err) {
-        console.error("Categorize failed:", err);
+    if (!item) {
+      const first = guardPrice({
+        price: scraped.price,
+        originalPrice: scraped.originalPrice,
+        method: scraped.method ?? "jsonld",
+        lastConfirmed: null,
+        pending: null,
+      });
+      if (first.action === "reject") {
+        return fail("We couldn't read a reliable price from that page. Please try again later.");
       }
-    });
+      item = await createItem(key, scraped);
+      created = true;
+    } else {
+      if (item.key !== key.key && item.key.startsWith("url:")) await rekeyItem(item, key);
+      await processReading(toPipelineItem(item), scraped, createDbPipelineStore());
+      item = (await findItemByKey(key.key)) ?? item;
+    }
   }
+
+  const [tracking] = await db
+    .insert(products)
+    .values({ user_id: user.id, catalog_item_id: item.id, ...(collectionId ? { collection_id: collectionId } : {}) })
+    .onConflictDoNothing({ target: [products.user_id, products.catalog_item_id] })
+    .returning({ id: products.id });
+
+  let productId = tracking?.id;
+  const alreadyTracking = !productId;
+  if (alreadyTracking) {
+    const existing = await db.query.products.findFirst({
+      columns: { id: true },
+      where: and(eq(products.user_id, user.id), eq(products.catalog_item_id, item.id)),
+    });
+    productId = existing!.id;
+    if (collectionId) await db.update(products).set({ collection_id: collectionId }).where(eq(products.id, productId));
+  }
+
+  if (created || !item.compared_at) enrichInBackground(item);
 
   revalidateApp();
   return {
     ok: true,
-    productId,
-    updated: Boolean(existing),
-    message: existing ? "Price refreshed" : `Now tracking ${scraped.name.slice(0, 60)}`,
+    productId: productId!,
+    updated: alreadyTracking,
+    message: alreadyTracking ? "You're already tracking this product" : `Now tracking ${item.name.slice(0, 60)}`,
   };
 }
 
@@ -154,22 +148,46 @@ export async function deleteProduct(productId: string): Promise<ActionResult> {
   const user = await getUser();
   if (!user) return fail("Please sign in first");
 
+  // Removes only this user's tracking; the shared catalog item and its history stay
+  // (untracked items are skipped by the daily check, so they cost nothing).
   const deleted = await db.delete(products).where(owned(productId, user.id)).returning({ id: products.id });
   if (deleted.length === 0) return fail("Product not found");
   revalidateApp();
   return { ok: true, message: "Stopped tracking" };
 }
 
-export async function refreshProduct(productId: string) {
+async function ownedItem(productId: string, userId: string) {
+  const row = await db.query.products.findFirst({
+    columns: { id: true },
+    where: owned(productId, userId),
+    with: { item: true },
+  });
+  return row?.item ?? null;
+}
+
+export async function refreshProduct(productId: string): Promise<ActionResult> {
   if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
   const user = await getUser();
   if (!user) return fail("Please sign in first");
 
-  const row = await db.query.products.findFirst({ columns: { url: true }, where: owned(productId, user.id) });
-  if (!row) return fail("Product not found");
-  const result = await addProduct(row.url);
+  const item = await ownedItem(productId, user.id);
+  if (!item) return fail("Product not found");
+  if (isFresh(item, MANUAL_CHECK_MIN_MS)) return { ok: true, message: "Price is up to date (checked within the last hour)" };
+
+  let scraped;
+  try {
+    scraped = await makeScraper().scrape(item.url);
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "Couldn't read that page");
+  }
+  const pipelineItem = (await loadPipelineItem(item.id)) ?? toPipelineItem(item);
+  const { outcome } = await processReading(pipelineItem, scraped, createDbPipelineStore());
+
+  revalidateApp();
   revalidatePath(`/products/${productId}`);
-  return result;
+  if (outcome === "held") return { ok: true, message: "The price changed a lot. We'll confirm it on the next check." };
+  if (outcome === "rejected") return fail("We couldn't read a reliable price right now");
+  return { ok: true, message: outcome === "changed" ? "Price updated" : "Price is up to date" };
 }
 
 export async function updateAlertRules(input: {
@@ -194,10 +212,7 @@ export async function updateAlertRules(input: {
   return { ok: true, message: "Alert rules saved" };
 }
 
-export async function setProductPublic(
-  productId: string,
-  isPublic: boolean
-): Promise<ActionResult<{ slug: string }>> {
+export async function setProductPublic(productId: string, isPublic: boolean): Promise<ActionResult<{ slug: string }>> {
   if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
   const user = await getUser();
   if (!user) return fail("Please sign in first");
@@ -215,10 +230,7 @@ export async function setProductPublic(
   return { ok: true, slug: row.slug };
 }
 
-export async function moveToCollection(
-  productId: string,
-  collectionId: string | null
-): Promise<ActionResult> {
+export async function moveToCollection(productId: string, collectionId: string | null): Promise<ActionResult> {
   if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
   const user = await getUser();
   if (!user) return fail("Please sign in first");
@@ -240,16 +252,37 @@ export async function resumeChecks(productId: string): Promise<ActionResult> {
   const user = await getUser();
   if (!user) return fail("Please sign in first");
 
-  const updated = await db
-    .update(products)
-    .set({ paused: false, fail_count: 0, last_error: null })
-    .where(owned(productId, user.id))
-    .returning({ id: products.id });
-  if (updated.length === 0) return fail("Couldn't resume checks");
+  const item = await ownedItem(productId, user.id);
+  if (!item) return fail("Product not found");
+  await db.update(catalogItems).set({ paused: false, fail_count: 0, last_error: null }).where(eq(catalogItems.id, item.id));
 
   revalidateApp();
   revalidatePath(`/products/${productId}`);
   return { ok: true, message: "Daily checks resumed" };
+}
+
+export async function compareStores(productId: string): Promise<ActionResult<{ offers: number }>> {
+  if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+
+  const item = await ownedItem(productId, user.id);
+  if (!item) return fail("Product not found");
+
+  const result = await runComparison(item, { minAgeMs: MANUAL_COMPARE_MIN_MS });
+  revalidatePath(`/products/${productId}`);
+  revalidateApp();
+
+  if (result.status === "done") {
+    return {
+      ok: true,
+      offers: result.offers,
+      message: result.offers ? `Found ${result.offers} other store${result.offers === 1 ? "" : "s"}` : "No other stores sell this exact item",
+    };
+  }
+  if (result.reason === "recent") return { ok: true, offers: 0, message: "Compared within the last day" };
+  if (result.reason === "budget") return fail("Comparisons are paused until next month to stay within the free plan");
+  return fail("Store comparison isn't available right now");
 }
 
 export async function generateVerdict(productId: string): Promise<ActionResult> {
@@ -258,40 +291,63 @@ export async function generateVerdict(productId: string): Promise<ActionResult> 
   const user = await getUser();
   if (!user) return fail("Please sign in first");
 
-  const product = await db.query.products.findFirst({
+  const row = await db.query.products.findFirst({
+    columns: { id: true },
     where: owned(productId, user.id),
-    with: { priceHistory: { columns: { price: true, checked_at: true }, orderBy: asc(priceHistory.checked_at) } },
+    with: {
+      item: {
+        with: {
+          priceHistory: { columns: { price: true, checked_at: true }, orderBy: asc(priceHistory.checked_at) },
+          offers: true,
+          trackers: { columns: { id: true } },
+        },
+      },
+    },
   });
-  if (!product) return fail("Product not found");
+  if (!row) return fail("Product not found");
+  const { item } = row;
+
+  const insights = computeInsights(item.priceHistory, item.current_price);
+  const evidence = buildEvidence({
+    currentPrice: item.current_price,
+    currency: item.currency,
+    originalPrice: item.original_price,
+    inStock: item.in_stock,
+    firstSeen: item.priceHistory[0]?.checked_at ?? item.created_at,
+    shoppers: item.trackers.length,
+    insights,
+    offers: toStoreOffers(item.offers),
+  });
+  const gate = gateVerdict(evidence);
+  if (gate.kind === "insufficient") return fail("Not enough price data yet. Try comparing stores instead.");
 
   if (!(await consumeAiQuota(user.id, serverEnv("AI_DAILY_LIMIT")))) {
     return fail("Daily AI limit reached. Try again tomorrow.");
   }
 
   try {
-    const insights = computeInsights(product.priceHistory, product.current_price);
-    const verdict = await generateDealVerdict({
-      name: product.name,
-      currentPrice: product.current_price,
-      currency: product.currency,
-      originalPrice: product.original_price,
-      inStock: product.in_stock,
-      insights,
-    });
-
+    const verdict = await generateDealVerdict({ name: item.name, evidence, gate });
     const values = {
       verdict: verdict.verdict,
       confidence: Math.round(verdict.confidence * 100) / 100,
       summary: verdict.summary,
       reasons: verdict.reasons,
-      price_at_generation: product.current_price,
+      evidence: {
+        coverage: evidence.coverage,
+        discountPct: evidence.discountPct,
+        bestOffer: evidence.bestOffer,
+        daysTracked: insights.daysTracked,
+        dataPoints: insights.dataPoints,
+        shoppers: evidence.shoppers,
+      },
+      price_at_generation: item.current_price,
       model: aiModelId(),
       generated_at: new Date().toISOString(),
     };
     await db
-      .insert(productInsights)
-      .values({ product_id: product.id, ...values })
-      .onConflictDoUpdate({ target: productInsights.product_id, set: values });
+      .insert(itemInsights)
+      .values({ catalog_item_id: item.id, ...values })
+      .onConflictDoUpdate({ target: itemInsights.catalog_item_id, set: values });
   } catch (error) {
     console.error("Verdict failed:", error);
     return fail("Couldn't generate a verdict right now");

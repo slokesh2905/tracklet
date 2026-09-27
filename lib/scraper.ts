@@ -1,5 +1,8 @@
 import Firecrawl from "@mendable/firecrawl-js";
+import { extractFromHtml, type ExtractMethod } from "@/lib/extract";
+import { fetchDirect } from "@/lib/fetch-page";
 import { normalizeCurrency, parsePrice } from "@/lib/format";
+import { productKeyFromUrl, resolveUrl } from "@/lib/product-key";
 
 export type ScrapedProduct = {
   name: string;
@@ -8,6 +11,14 @@ export type ScrapedProduct = {
   imageUrl: string | null;
   inStock: boolean;
   originalPrice: number | null;
+  /** How the price was read; `llm` readings need a second confirmation. */
+  method?: ExtractMethod;
+  /** URL after redirects, used to derive the product key. */
+  finalUrl?: string;
+  sku?: string | null;
+  canonicalUrl?: string | null;
+  /** Which fetcher got the page (direct = free, firecrawl = 1 credit). */
+  via?: "direct" | "firecrawl";
 };
 
 export interface Scraper {
@@ -15,103 +26,89 @@ export interface Scraper {
 }
 
 export class ScrapeError extends Error {
-  constructor(
-    message: string,
-    /** Page markdown when the page loaded but no price was found (AI fallback input). */
-    readonly markdown?: string
-  ) {
+  constructor(message: string) {
     super(message);
     this.name = "ScrapeError";
   }
 }
 
-const EXTRACTION_SCHEMA = {
-  type: "object",
-  properties: {
-    productName: { type: "string", description: "The product's full title" },
-    currentPrice: {
-      type: "number",
-      description: "The price a shopper pays right now, as a plain number",
-    },
-    currencyCode: {
-      type: "string",
-      description: "ISO 4217 currency code such as USD or INR",
-    },
-    originalPrice: {
-      type: ["number", "null"],
-      description: "List/MRP price before discount, if a sale is shown",
-    },
-    inStock: {
-      type: "boolean",
-      description: "Whether the product can currently be bought",
-    },
-    productImageUrl: {
-      type: ["string", "null"],
-      description: "Main product image URL",
-    },
-  },
-  required: ["productName", "currentPrice"],
-};
-
-/** Turn loosely-typed extractor output into a validated ScrapedProduct, or null. */
+/** Turn loosely-typed extractor output (e.g. from the LLM) into a validated ScrapedProduct, or null. */
 export function toScrapedProduct(raw: unknown): ScrapedProduct | null {
   if (!raw || typeof raw !== "object") return null;
   const data = raw as Record<string, unknown>;
-  const name =
-    typeof data.productName === "string" ? data.productName.trim() : "";
+  const name = typeof data.productName === "string" ? data.productName.trim() : "";
   const price = parsePrice(data.currentPrice);
   if (!name || price === null || price === 0) return null;
 
   const original = parsePrice(data.originalPrice);
-  const image =
-    typeof data.productImageUrl === "string" ? data.productImageUrl : null;
+  const image = typeof data.productImageUrl === "string" ? data.productImageUrl : null;
 
   return {
     name: name.slice(0, 300),
     price: Math.round(price * 100) / 100,
-    currency: normalizeCurrency(
-      typeof data.currencyCode === "string" ? data.currencyCode : null
-    ),
+    currency: normalizeCurrency(typeof data.currencyCode === "string" ? data.currencyCode : null),
     imageUrl: image && /^https?:\/\//.test(image) ? image : null,
     inStock: data.inStock !== false,
     originalPrice: original && original > price ? original : null,
   };
 }
 
-export function createFirecrawlScraper(apiKey: string): Scraper {
-  const client = new Firecrawl({ apiKey });
+export type ScraperOptions = {
+  /** Firecrawl key for pages that block direct requests (1 credit per page). */
+  firecrawlApiKey?: string;
+  /** Last-resort reader for pages without machine-readable prices (free Nemotron). */
+  llmExtract?: (url: string, markdown: string) => Promise<ScrapedProduct | null>;
+  fetchImpl?: typeof fetch;
+};
+
+/**
+ * Tiered, near-free product reader:
+ *   1. direct fetch + JSON-LD / selectors / OpenGraph   (free)
+ *   2. Firecrawl raw HTML + markdown, same extractors    (1 credit)
+ *   3. LLM over the markdown                             (free, flagged `llm`)
+ * The old single-step Firecrawl JSON extraction cost 5 credits per page.
+ */
+export function createScraper({ firecrawlApiKey, llmExtract, fetchImpl = fetch }: ScraperOptions = {}): Scraper {
+  const firecrawl = firecrawlApiKey ? new Firecrawl({ apiKey: firecrawlApiKey }) : null;
 
   return {
     async scrape(url) {
-      let doc;
+      const resolved = await resolveUrl(url, fetchImpl);
+      // Fetch the canonical product page when we know the retailer id: share links
+      // often resolve to app deep links (dl.flipkart.com/dl/…) that serve less to browsers.
+      let target = resolved;
       try {
-        doc = await client.scrape(url, {
-          formats: [
-            {
-              type: "json",
-              schema: EXTRACTION_SCHEMA,
-              prompt:
-                "Extract the main product on this page. currentPrice is what a shopper pays now (the sale price if discounted).",
-            },
-            "markdown",
-          ],
-          onlyMainContent: true,
-          timeout: 60_000,
-        });
-      } catch (error) {
-        throw new ScrapeError(
-          `Couldn't load that page: ${error instanceof Error ? error.message : "unknown error"}`
-        );
+        const key = productKeyFromUrl(resolved);
+        if (!key.key.startsWith("url:")) target = key.canonicalUrl;
+      } catch {
+        // Unparseable URL: fetch it as given.
       }
 
-      const product = toScrapedProduct(doc.json);
-      if (!product) {
-        throw new ScrapeError(
-          "Couldn't find a product price on that page",
-          doc.markdown?.slice(0, 20_000)
-        );
+      const direct = await fetchDirect(target, fetchImpl);
+      if (direct) {
+        const product = extractFromHtml(direct.html, direct.finalUrl);
+        if (product) return { ...product, finalUrl: direct.finalUrl, via: "direct" };
       }
-      return product;
+
+      if (!firecrawl) throw new ScrapeError("Couldn't read that page");
+
+      let doc;
+      try {
+        doc = await firecrawl.scrape(target, { formats: ["rawHtml", "markdown"], timeout: 60_000 });
+      } catch (error) {
+        throw new ScrapeError(`Couldn't load that page: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+
+      const finalUrl = (doc.metadata?.url as string | undefined) ?? target;
+      const product = doc.rawHtml ? extractFromHtml(doc.rawHtml, finalUrl) : null;
+      if (product) return { ...product, finalUrl, via: "firecrawl" };
+
+      if (llmExtract && doc.markdown) {
+        const fromLlm = await llmExtract(finalUrl, doc.markdown.slice(0, 20_000)).catch(() => null);
+        if (fromLlm) return { ...fromLlm, method: "llm", finalUrl, via: "firecrawl" };
+      }
+
+      throw new ScrapeError("Couldn't find a product price on that page");
     },
   };
 }

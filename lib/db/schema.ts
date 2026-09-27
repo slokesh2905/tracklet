@@ -121,7 +121,9 @@ export const rateLimit = pgTable("rate_limit", {
 // ---------------------------------------------------------------------------
 
 export type AlertKind = "target_reached" | "price_drop" | "all_time_low" | "back_in_stock";
-export type Verdict = "buy_now" | "wait" | "fair";
+export type Verdict = "buy_now" | "wait" | "fair" | "buy_elsewhere";
+export type PriceSource = "add" | "check" | "confirm" | "import";
+export type OfferMatch = "exact" | "similar";
 
 export const collections = pgTable(
   "collections",
@@ -141,6 +143,45 @@ export const collections = pgTable(
   ]
 );
 
+/**
+ * One row per real product (keyed by retailer id, e.g. "flipkart:SFFHNZ78MHFTK5EQ"),
+ * shared by every user tracking it: one scrape per day, one price history.
+ */
+export const catalogItems = pgTable(
+  "catalog_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull().unique(),
+    retailer: text("retailer").notNull(),
+    url: text("url").notNull(),
+    name: text("name").notNull(),
+    image_url: text("image_url"),
+    category: text("category"),
+    current_price: money("current_price").notNull(),
+    original_price: money("original_price"),
+    currency: text("currency").notNull().default("INR"),
+    in_stock: boolean("in_stock").notNull().default(true),
+    // Denormalised from price_history by trigger.
+    lowest_price: money("lowest_price"),
+    highest_price: money("highest_price"),
+    // A surprising reading awaiting a confirming second reading (see lib/price-guard.ts).
+    pending_price: money("pending_price"),
+    pending_since: isoTimestamp("pending_since"),
+    last_checked_at: isoTimestamp("last_checked_at"),
+    last_error: text("last_error"),
+    fail_count: integer("fail_count").notNull().default(0),
+    paused: boolean("paused").notNull().default(false),
+    compared_at: isoTimestamp("compared_at"),
+    created_at: createdAt(),
+    updated_at: isoTimestamp("updated_at").notNull().default(sql`now()`),
+  },
+  (t) => [
+    index("catalog_items_stalest_idx").on(t.last_checked_at.asc().nullsFirst()).where(sql`not ${t.paused}`),
+    check("catalog_items_price_nonneg", sql`${t.current_price} >= 0`),
+  ]
+);
+
+/** A user tracking a catalog item: their own alert rules, collection and sharing. */
 export const products = pgTable(
   "products",
   {
@@ -148,57 +189,44 @@ export const products = pgTable(
     user_id: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    url: text("url").notNull(),
-    name: text("name").notNull(),
-    current_price: money("current_price").notNull(),
-    original_price: money("original_price"),
-    currency: text("currency").notNull().default("USD"),
-    image_url: text("image_url"),
-    in_stock: boolean("in_stock").notNull().default(true),
-    category: text("category"),
+    catalog_item_id: uuid("catalog_item_id")
+      .notNull()
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
     collection_id: uuid("collection_id").references(() => collections.id, { onDelete: "set null" }),
     // Alert rules: fire when price <= target_price, or drops by >= alert_pct in one check.
     target_price: money("target_price"),
     alert_pct: numeric("alert_pct", { precision: 5, scale: 2, mode: "number" }),
-    // Denormalised from price_history by trigger so cards need no aggregate query.
-    lowest_price: money("lowest_price"),
-    highest_price: money("highest_price"),
     is_public: boolean("is_public").notNull().default(false),
     share_slug: shareSlug(),
-    // Pipeline bookkeeping.
-    last_checked_at: isoTimestamp("last_checked_at"),
-    last_error: text("last_error"),
-    fail_count: integer("fail_count").notNull().default(0),
-    paused: boolean("paused").notNull().default(false),
     created_at: createdAt(),
     updated_at: isoTimestamp("updated_at").notNull().default(sql`now()`),
   },
   (t) => [
-    unique("products_user_url_key").on(t.user_id, t.url),
+    unique("products_user_item_key").on(t.user_id, t.catalog_item_id),
     index("products_user_idx").on(t.user_id, t.created_at.desc()),
-    index("products_stalest_idx").on(t.last_checked_at.asc().nullsFirst()).where(sql`not ${t.paused}`),
-    index("products_url_idx").on(t.url),
+    index("products_item_idx").on(t.catalog_item_id),
     index("products_collection_idx").on(t.collection_id),
-    check("products_price_nonneg", sql`${t.current_price} >= 0`),
     check("products_target_positive", sql`${t.target_price} > 0`),
     check("products_alert_pct_range", sql`${t.alert_pct} > 0 and ${t.alert_pct} < 100`),
   ]
 );
 
+/** Shared price history of a catalog item (every tracker's readings pooled). */
 export const priceHistory = pgTable(
   "price_history",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    product_id: uuid("product_id")
+    catalog_item_id: uuid("catalog_item_id")
       .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
     price: money("price").notNull(),
     currency: text("currency").notNull(),
     in_stock: boolean("in_stock"),
+    source: text("source").$type<PriceSource>().notNull().default("check"),
     checked_at: isoTimestamp("checked_at").notNull().default(sql`now()`),
   },
   (t) => [
-    index("price_history_product_checked_idx").on(t.product_id, t.checked_at),
+    index("price_history_item_checked_idx").on(t.catalog_item_id, t.checked_at),
     check("price_history_price_nonneg", sql`${t.price} >= 0`),
   ]
 );
@@ -249,23 +277,48 @@ export const userSettings = pgTable(
   ]
 );
 
-export const productInsights = pgTable(
-  "product_insights",
+/** The same (or a similar) product on other stores, found by cross-store comparison. */
+export const storeOffers = pgTable(
+  "store_offers",
   {
-    product_id: uuid("product_id")
+    id: uuid("id").primaryKey().defaultRandom(),
+    catalog_item_id: uuid("catalog_item_id")
+      .notNull()
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
+    retailer: text("retailer").notNull(),
+    url: text("url").notNull(),
+    name: text("name").notNull(),
+    price: money("price").notNull(),
+    currency: text("currency").notNull(),
+    in_stock: boolean("in_stock").notNull().default(true),
+    match: text("match").$type<OfferMatch>().notNull(),
+    checked_at: isoTimestamp("checked_at").notNull().default(sql`now()`),
+  },
+  (t) => [
+    unique("store_offers_item_url_key").on(t.catalog_item_id, t.url),
+    check("store_offers_match", sql`${t.match} in ('exact', 'similar')`),
+  ]
+);
+
+/** Cached AI verdict per catalog item, shared by everyone tracking it. */
+export const itemInsights = pgTable(
+  "item_insights",
+  {
+    catalog_item_id: uuid("catalog_item_id")
       .primaryKey()
-      .references(() => products.id, { onDelete: "cascade" }),
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
     verdict: text("verdict").$type<Verdict>().notNull(),
     confidence: numeric("confidence", { precision: 3, scale: 2, mode: "number" }).notNull(),
     summary: text("summary").notNull(),
     reasons: jsonb("reasons").$type<string[]>().notNull().default([]),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
     price_at_generation: money("price_at_generation").notNull(),
     model: text("model").notNull(),
     generated_at: isoTimestamp("generated_at").notNull().default(sql`now()`),
   },
   (t) => [
-    check("product_insights_verdict", sql`${t.verdict} in ('buy_now', 'wait', 'fair')`),
-    check("product_insights_confidence", sql`${t.confidence} between 0 and 1`),
+    check("item_insights_verdict", sql`${t.verdict} in ('buy_now', 'wait', 'fair', 'buy_elsewhere')`),
+    check("item_insights_confidence", sql`${t.confidence} between 0 and 1`),
   ]
 );
 
@@ -292,6 +345,10 @@ export const checkRuns = pgTable("check_runs", {
   price_changes: integer("price_changes").notNull().default(0),
   alerts_sent: integer("alerts_sent").notNull().default(0),
   failures: integer("failures").notNull().default(0),
+  held: integer("held").notNull().default(0),
+  rejected: integer("rejected").notNull().default(0),
+  /** Pages that needed Firecrawl (1 credit each); the rest were fetched for free. */
+  firecrawl_fetches: integer("firecrawl_fetches").notNull().default(0),
   duration_ms: integer("duration_ms"),
 });
 
@@ -299,11 +356,17 @@ export const checkRuns = pgTable("check_runs", {
 // Relations (for the relational query API)
 // ---------------------------------------------------------------------------
 
-export const productsRelations = relations(products, ({ one, many }) => ({
-  collection: one(collections, { fields: [products.collection_id], references: [collections.id] }),
+export const catalogItemsRelations = relations(catalogItems, ({ one, many }) => ({
+  trackers: many(products),
   priceHistory: many(priceHistory),
+  offers: many(storeOffers),
+  insight: one(itemInsights, { fields: [catalogItems.id], references: [itemInsights.catalog_item_id] }),
+}));
+
+export const productsRelations = relations(products, ({ one, many }) => ({
+  item: one(catalogItems, { fields: [products.catalog_item_id], references: [catalogItems.id] }),
+  collection: one(collections, { fields: [products.collection_id], references: [collections.id] }),
   alerts: many(alerts),
-  insight: one(productInsights, { fields: [products.id], references: [productInsights.product_id] }),
 }));
 
 export const collectionsRelations = relations(collections, ({ many }) => ({
@@ -311,25 +374,53 @@ export const collectionsRelations = relations(collections, ({ many }) => ({
 }));
 
 export const priceHistoryRelations = relations(priceHistory, ({ one }) => ({
-  product: one(products, { fields: [priceHistory.product_id], references: [products.id] }),
+  item: one(catalogItems, { fields: [priceHistory.catalog_item_id], references: [catalogItems.id] }),
+}));
+
+export const storeOffersRelations = relations(storeOffers, ({ one }) => ({
+  item: one(catalogItems, { fields: [storeOffers.catalog_item_id], references: [catalogItems.id] }),
+}));
+
+export const itemInsightsRelations = relations(itemInsights, ({ one }) => ({
+  item: one(catalogItems, { fields: [itemInsights.catalog_item_id], references: [catalogItems.id] }),
 }));
 
 export const alertsRelations = relations(alerts, ({ one }) => ({
   product: one(products, { fields: [alerts.product_id], references: [products.id] }),
 }));
 
-export const productInsightsRelations = relations(productInsights, ({ one }) => ({
-  product: one(products, { fields: [productInsights.product_id], references: [products.id] }),
-}));
-
 // ---------------------------------------------------------------------------
 // Row types used across the app
 // ---------------------------------------------------------------------------
 
+export type CatalogItemRow = typeof catalogItems.$inferSelect;
+export type TrackingRow = typeof products.$inferSelect;
 export type CollectionRow = typeof collections.$inferSelect;
-export type ProductRow = typeof products.$inferSelect;
 export type PriceHistoryRow = typeof priceHistory.$inferSelect;
 export type AlertRow = typeof alerts.$inferSelect;
 export type UserSettingsRow = typeof userSettings.$inferSelect;
-export type ProductInsightRow = typeof productInsights.$inferSelect;
+export type ItemInsightRow = typeof itemInsights.$inferSelect;
+export type StoreOfferRow = typeof storeOffers.$inferSelect;
 export type CheckRunRow = typeof checkRuns.$inferSelect;
+
+/** Catalog fields the UI shows alongside a user's tracking row. */
+export const ITEM_FIELDS = [
+  "url",
+  "name",
+  "image_url",
+  "category",
+  "current_price",
+  "original_price",
+  "currency",
+  "in_stock",
+  "lowest_price",
+  "highest_price",
+  "pending_price",
+  "last_checked_at",
+  "last_error",
+  "fail_count",
+  "paused",
+] as const satisfies readonly (keyof CatalogItemRow)[];
+
+/** What the UI works with: a user's tracking row flattened with its catalog item. */
+export type ProductRow = TrackingRow & Pick<CatalogItemRow, (typeof ITEM_FIELDS)[number]>;

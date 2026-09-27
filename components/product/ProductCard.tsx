@@ -11,7 +11,9 @@ import {
   PackageX,
   PauseCircle,
   Target,
+  Store,
   Trash2,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import { deleteProduct, moveToCollection } from "@/app/actions/products";
@@ -36,6 +38,7 @@ import {
 import type { DashboardProduct } from "@/lib/data";
 import type { CollectionRow } from "@/lib/db/schema";
 import { formatPercent, formatPrice, hostname, percentChange, timeAgo } from "@/lib/format";
+import { retailerName } from "@/lib/retailers";
 
 type Props = {
   product: DashboardProduct;
@@ -161,6 +164,17 @@ export default function ProductCard({ product, collections }: Props) {
         {product.isAllTimeLow && product.status !== "new" && <AllTimeLowBadge />}
         {product.status !== "new" && product.in_stock && <DealBadge score={product.dealScore} label={product.dealLabel} />}
         {product.verdict && <VerdictBadge verdict={product.verdict} />}
+        {product.bestOffer && product.bestOffer.savingPct >= 3 && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-chart-2/15 px-2 py-0.5 text-xs font-medium text-chart-2">
+            <Store className="size-3" /> Cheaper on {retailerName(product.bestOffer.retailer)} ·{" "}
+            {formatPrice(product.bestOffer.price, product.currency)}
+          </span>
+        )}
+        {product.shoppers > 1 && (
+          <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+            <Users className="size-3" /> {product.shoppers} tracking
+          </span>
+        )}
         {hasRule && (
           <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
             <Target className="size-3" />

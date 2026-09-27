@@ -59,6 +59,7 @@ export const VERDICT_COPY: Record<Verdict, { label: string; className: string }>
   buy_now: { label: "Buy now", className: "bg-success/12 text-success" },
   fair: { label: "Fair price", className: "bg-muted text-muted-foreground" },
   wait: { label: "Wait", className: "bg-danger/12 text-danger" },
+  buy_elsewhere: { label: "Cheaper elsewhere", className: "bg-chart-2/15 text-chart-2" },
 };
 
 export function VerdictBadge({ verdict }: { verdict: Verdict }) {

@@ -10,26 +10,23 @@ export async function GET() {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const rows = await db.query.products.findMany({
-    columns: {
-      name: true,
-      url: true,
-      currency: true,
-      current_price: true,
-      target_price: true,
-      lowest_price: true,
-      highest_price: true,
-      created_at: true,
-    },
+  const tracked = await db.query.products.findMany({
+    columns: { target_price: true, created_at: true },
     where: eq(products.user_id, user.id),
     orderBy: asc(products.created_at),
     with: {
-      priceHistory: {
-        columns: { price: true, checked_at: true, in_stock: true },
-        orderBy: asc(priceHistory.checked_at),
+      item: {
+        columns: { name: true, url: true, currency: true, current_price: true, lowest_price: true, highest_price: true },
+        with: {
+          priceHistory: {
+            columns: { price: true, checked_at: true, in_stock: true },
+            orderBy: asc(priceHistory.checked_at),
+          },
+        },
       },
     },
   });
+  const rows = tracked.map(({ item, ...t }) => ({ ...t, ...item }));
 
   const out: Array<Array<string | number | boolean | null>> = [];
   for (const p of rows) {

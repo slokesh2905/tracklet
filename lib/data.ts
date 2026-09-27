@@ -6,24 +6,32 @@ import { db } from "@/lib/db";
 import {
   alerts,
   collections,
+  ITEM_FIELDS,
   priceHistory,
   products,
   userSettings,
   type AlertRow,
+  type CatalogItemRow,
   type CollectionRow,
-  type ProductInsightRow,
+  type ItemInsightRow,
   type ProductRow,
+  type StoreOfferRow,
+  type TrackingRow,
   type UserSettingsRow,
 } from "@/lib/db/schema";
 import { isGreatDeal } from "@/lib/deals";
+import { buildEvidence, gateVerdict, type Evidence, type Gate, type StoreOffer } from "@/lib/evidence";
 import { DAY_MS } from "@/lib/format";
 import { computeInsights, type Insights, type PricePoint } from "@/lib/insights";
 import { getUser } from "@/lib/session";
 
-// Every loader here scopes its queries to the signed-in user. The database is
-// never reachable from the browser, so this layer is the authorization boundary.
+// Every loader here scopes its queries to the signed-in user's tracking rows.
+// Catalog data (prices, history, offers) is shared across users, but contains
+// nothing personal. The database is never reachable from the browser.
 
 export type ProductStatus = "new" | "dropped" | "increased" | "unchanged";
+
+export type BestOffer = Pick<StoreOfferRow, "retailer" | "url" | "price"> & { savingPct: number };
 
 export type DashboardProduct = ProductRow & {
   status: ProductStatus;
@@ -35,7 +43,10 @@ export type DashboardProduct = ProductRow & {
   trend: Insights["trend"];
   /** Up to 30 most recent prices for the card sparkline. */
   spark: number[];
-  verdict: ProductInsightRow["verdict"] | null;
+  verdict: ItemInsightRow["verdict"] | null;
+  /** How many users track this product (shared price data). */
+  shoppers: number;
+  bestOffer: BestOffer | null;
 };
 
 export type DashboardStats = {
@@ -54,6 +65,24 @@ export const DEFAULT_SETTINGS: Omit<UserSettingsRow, "user_id" | "updated_at"> =
   discord_webhook_url: null,
 };
 
+/** A tracking row flattened with the catalog fields the UI shows. */
+export function flatten(tracking: TrackingRow, item: CatalogItemRow): ProductRow {
+  const picked = Object.fromEntries(ITEM_FIELDS.map((f) => [f, item[f]])) as Pick<CatalogItemRow, (typeof ITEM_FIELDS)[number]>;
+  return { ...tracking, ...picked };
+}
+
+export function toStoreOffers(offers: StoreOfferRow[]): StoreOffer[] {
+  return offers.map((o) => ({
+    retailer: o.retailer,
+    url: o.url,
+    price: o.price,
+    currency: o.currency,
+    inStock: o.in_stock,
+    match: o.match,
+    checkedAt: o.checked_at,
+  }));
+}
+
 export const getSettings = cache(async () => {
   const user = await getUser();
   if (!user) return DEFAULT_SETTINGS;
@@ -71,27 +100,38 @@ export const getUnreadAlertCount = cache(async () => {
   return row?.n ?? 0;
 });
 
-function statusOf(product: ProductRow, firstPrice: number, points: number, now: number): ProductStatus {
-  if (points <= 1 && now - new Date(product.created_at).getTime() < DAY_MS) return "new";
-  if (product.current_price < firstPrice) return "dropped";
-  if (product.current_price > firstPrice) return "increased";
+function statusOf(created: string, current: number, firstPrice: number, points: number, now: number): ProductStatus {
+  if (points <= 1 && now - new Date(created).getTime() < DAY_MS) return "new";
+  if (current < firstPrice) return "dropped";
+  if (current > firstPrice) return "increased";
   return "unchanged";
 }
 
-type ProductWithRelations = ProductRow & {
+type ItemWithRelations = CatalogItemRow & {
   priceHistory: PricePoint[];
-  insight: Pick<ProductInsightRow, "verdict"> | null;
+  insight: Pick<ItemInsightRow, "verdict"> | null;
+  offers: StoreOfferRow[];
+  trackers: { id: string }[];
 };
 
-export function enrichProduct(p: ProductWithRelations, now = Date.now()): DashboardProduct {
-  const history = [...p.priceHistory].sort((a, b) => a.checked_at.localeCompare(b.checked_at));
-  const insights = computeInsights(history, p.current_price, now);
-  const firstPrice = history[0]?.price ?? p.current_price;
-  const { priceHistory: _h, insight, ...product } = p;
+export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, now = Date.now()): DashboardProduct {
+  const history = [...item.priceHistory].sort((a, b) => a.checked_at.localeCompare(b.checked_at));
+  const insights = computeInsights(history, item.current_price, now);
+  const firstPrice = history[0]?.price ?? item.current_price;
+  const evidence = buildEvidence({
+    currentPrice: item.current_price,
+    currency: item.currency,
+    originalPrice: item.original_price,
+    inStock: item.in_stock,
+    firstSeen: history[0]?.checked_at ?? item.created_at,
+    shoppers: item.trackers.length,
+    insights,
+    offers: toStoreOffers(item.offers),
+  });
 
   return {
-    ...product,
-    status: statusOf(product, firstPrice, history.length, now),
+    ...flatten(tracking, item),
+    status: statusOf(tracking.created_at, item.current_price, firstPrice, history.length, now),
     percentChange: insights.changeFromFirst,
     firstPrice,
     dealScore: insights.dealScore,
@@ -99,9 +139,20 @@ export function enrichProduct(p: ProductWithRelations, now = Date.now()): Dashbo
     isAllTimeLow: insights.isAllTimeLow,
     trend: insights.trend,
     spark: history.slice(-30).map((h) => h.price),
-    verdict: insight?.verdict ?? null,
+    verdict: item.insight?.verdict ?? null,
+    shoppers: item.trackers.length,
+    bestOffer: evidence.bestOffer
+      ? { retailer: evidence.bestOffer.retailer, url: evidence.bestOffer.url, price: evidence.bestOffer.price, savingPct: evidence.bestOffer.savingPct }
+      : null,
   };
 }
+
+const ITEM_WITH = {
+  priceHistory: { columns: { price: true, checked_at: true } },
+  insight: { columns: { verdict: true } },
+  offers: true,
+  trackers: { columns: { id: true } },
+} as const;
 
 export const getDashboardData = cache(async () => {
   const user = await getUser();
@@ -111,10 +162,7 @@ export const getDashboardData = cache(async () => {
     db.query.products.findMany({
       where: eq(products.user_id, user.id),
       orderBy: desc(products.created_at),
-      with: {
-        priceHistory: { columns: { price: true, checked_at: true } },
-        insight: { columns: { verdict: true } },
-      },
+      with: { item: { with: ITEM_WITH } },
     }),
     getSettings(),
     getUnreadAlertCount(),
@@ -125,7 +173,7 @@ export const getDashboardData = cache(async () => {
   ]);
 
   const now = Date.now();
-  const enriched = rows.map((p) => enrichProduct(p, now));
+  const enriched = rows.map(({ item, ...tracking }) => enrichProduct(tracking, item, now));
 
   // Convert every saving into the user's currency before summing.
   const rates = await getRates(settings.preferred_currency);
@@ -159,11 +207,14 @@ export async function getProductDetail(id: string) {
   const row = await db.query.products.findFirst({
     where: and(eq(products.id, id), eq(products.user_id, user.id)),
     with: {
-      priceHistory: {
-        columns: { price: true, checked_at: true, in_stock: true },
-        orderBy: asc(priceHistory.checked_at),
+      item: {
+        with: {
+          priceHistory: { columns: { price: true, checked_at: true, in_stock: true }, orderBy: asc(priceHistory.checked_at) },
+          insight: true,
+          offers: true,
+          trackers: { columns: { id: true } },
+        },
       },
-      insight: true,
       alerts: {
         columns: { id: true, kind: true, old_price: true, new_price: true, currency: true, created_at: true },
         orderBy: desc(alerts.created_at),
@@ -173,14 +224,33 @@ export async function getProductDetail(id: string) {
   });
   if (!row) return null;
 
-  const { priceHistory: history, insight, alerts: recentAlerts, ...product } = row;
-  const insights = computeInsights(history, product.current_price);
-  const verdict = insight && insight.price_at_generation === product.current_price ? insight : null;
+  const { item, alerts: recentAlerts, ...tracking } = row;
+  const history = item.priceHistory;
+  const insights = computeInsights(history, item.current_price);
+  const offers = toStoreOffers(item.offers);
+  const evidence: Evidence = buildEvidence({
+    currentPrice: item.current_price,
+    currency: item.currency,
+    originalPrice: item.original_price,
+    inStock: item.in_stock,
+    firstSeen: history[0]?.checked_at ?? item.created_at,
+    shoppers: item.trackers.length,
+    insights,
+    offers,
+  });
+  const gate: Gate = gateVerdict(evidence);
+  const insight = item.insight;
+  const verdict = insight && insight.price_at_generation === item.current_price ? insight : null;
 
   return {
-    product,
+    product: flatten(tracking, item),
+    catalogItemId: item.id,
+    comparedAt: item.compared_at,
     history: history.map((h) => ({ price: h.price, checked_at: h.checked_at })),
     insights,
+    evidence,
+    gate,
+    offers: [...offers].sort((a, b) => a.price - b.price),
     verdict,
     staleVerdict: insight && !verdict ? insight : null,
     alerts: recentAlerts,
@@ -192,25 +262,32 @@ export type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProductDeta
 export async function getAlerts() {
   const user = await getUser();
   if (!user) return [];
-  return db.query.alerts.findMany({
+  const rows = await db.query.alerts.findMany({
     where: eq(alerts.user_id, user.id),
     orderBy: desc(alerts.created_at),
     limit: 100,
-    with: { product: { columns: { name: true, image_url: true, url: true } } },
-  }) as Promise<Array<AlertRow & { product: Pick<ProductRow, "name" | "image_url" | "url"> | null }>>;
+    with: { product: { with: { item: { columns: { name: true, image_url: true, url: true } } } } },
+  });
+  return rows.map(({ product, ...alert }) => ({ ...alert, product: product?.item ?? null })) as Array<
+    AlertRow & { product: Pick<CatalogItemRow, "name" | "image_url" | "url"> | null }
+  >;
 }
 
 export async function getCollectionsWithCounts() {
   const user = await getUser();
   if (!user) return [];
-  return db.query.collections.findMany({
+  const rows = await db.query.collections.findMany({
     where: eq(collections.user_id, user.id),
     orderBy: asc(collections.created_at),
     with: {
       products: {
-        columns: { id: true, name: true, image_url: true, current_price: true, currency: true },
         orderBy: desc(products.created_at),
+        with: { item: { columns: { name: true, image_url: true, current_price: true, currency: true } } },
       },
     },
   });
+  return rows.map(({ products: tracked, ...c }) => ({
+    ...c,
+    products: tracked.map((t) => ({ id: t.id, ...t.item })),
+  }));
 }
