@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
+import { withStrictSsl } from "../lib/db/url";
 
 // Local dev DB first (see .env.development.local), then pulled Vercel env.
 // Neither overrides variables already set, so CI/Vercel env always wins.
@@ -24,7 +25,7 @@ if (!url) throw new Error("Set DATABASE_URL (or DATABASE_URL_UNPOOLED)");
 const isLocal = ["localhost", "127.0.0.1"].includes(new URL(url).hostname);
 
 async function run(task: string) {
-  const client = new Client({ connectionString: url });
+  const client = new Client({ connectionString: withStrictSsl(url!) });
   await client.connect();
   try {
     if (task === "seed") {
