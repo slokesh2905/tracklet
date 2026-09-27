@@ -1,32 +1,18 @@
--- Local development / E2E seed. Runs on `supabase start` and `supabase db reset` only.
--- Demo login: demo@tracklet.dev (magic link via the local Mailpit inbox at :54324).
+-- Local development / E2E seed (never run against production). Applied by `npm run db:seed`.
+-- Demo login: demo@tracklet.dev via magic link (printed to the dev server console).
 
 do $$
 declare
-  demo uuid := '00000000-0000-4000-a000-000000000001';
+  demo text := 'demo-user-0001';
   office uuid := '00000000-0000-4000-b000-000000000001';
   gifts uuid := '00000000-0000-4000-b000-000000000002';
-  pid uuid;
 begin
-  insert into auth.users (
-    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
-    raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
-    confirmation_token, recovery_token, email_change_token_new, email_change
-  ) values (
-    '00000000-0000-0000-0000-000000000000', demo, 'authenticated', 'authenticated',
-    'demo@tracklet.dev', extensions.crypt('tracklet-demo', extensions.gen_salt('bf')), now(),
-    '{"provider":"email","providers":["email"]}', '{}', now() - interval '130 days', now(),
-    '', '', '', ''
-  );
+  insert into "user" (id, name, email, email_verified, created_at, updated_at)
+  values (demo, 'Demo Shopper', 'demo@tracklet.dev', true, now() - interval '130 days', now());
 
-  insert into auth.identities (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
-  values (gen_random_uuid(), demo, demo::text,
-          jsonb_build_object('sub', demo::text, 'email', 'demo@tracklet.dev', 'email_verified', true),
-          'email', now(), now(), now());
+  insert into user_settings (user_id, preferred_currency) values (demo, 'INR');
 
-  insert into public.user_settings (user_id, preferred_currency) values (demo, 'INR');
-
-  insert into public.collections (id, user_id, name, is_public, share_slug) values
+  insert into collections (id, user_id, name, is_public, share_slug) values
     (office, demo, 'Home office', true, 'bbbbbbbbbbb1'),
     (gifts, demo, 'Gift ideas', false, 'bbbbbbbbbbb2');
 end $$;
@@ -39,12 +25,12 @@ create function pg_temp.seed_product(
   p_public boolean default false, p_slug text default null, p_category text default null
 ) returns uuid language plpgsql as $$
 declare
-  demo uuid := '00000000-0000-4000-a000-000000000001';
+  demo text := 'demo-user-0001';
   pid uuid;
   i int;
   n int := array_length(p_points, 1);
 begin
-  insert into public.products (
+  insert into products (
     user_id, url, name, current_price, original_price, currency, in_stock, target_price,
     collection_id, is_public, share_slug, category, created_at, last_checked_at
   ) values (
@@ -54,7 +40,7 @@ begin
   ) returning id into pid;
 
   for i in 1..n loop
-    insert into public.price_history (product_id, price, currency, in_stock, checked_at)
+    insert into price_history (product_id, price, currency, in_stock, checked_at)
     values (pid, p_points[i][2], p_currency, case when i = n then p_in_stock else true end,
             now() - make_interval(days => p_points[i][1]::int));
   end loop;
@@ -63,7 +49,7 @@ end $$;
 
 do $$
 declare
-  demo uuid := '00000000-0000-4000-a000-000000000001';
+  demo text := 'demo-user-0001';
   office uuid := '00000000-0000-4000-b000-000000000001';
   gifts uuid := '00000000-0000-4000-b000-000000000002';
   sony uuid; dyson uuid; airpods uuid;
@@ -102,10 +88,10 @@ begin
     'Logitech MX Master 3S Performance Wireless Mouse', 'https://www.logitech.com/en-us/products/mice/mx-master-3s.html', 'USD',
     array[[0, 99.99]], p_collection => office, p_category => 'Computers');
 
-  insert into public.alerts (user_id, product_id, kind, old_price, new_price, currency, channels, created_at) values
+  insert into alerts (user_id, product_id, kind, old_price, new_price, currency, channels, created_at) values
     (demo, sony, 'target_reached', 24990, 23490, 'INR', '{email,discord}', now() - interval '3 days'),
     (demo, dyson, 'all_time_low', 46900, 44900, 'INR', '{email}', now() - interval '2 days'),
     (demo, airpods, 'price_drop', 229.99, 189.99, 'USD', '{email}', now() - interval '10 days');
 
-  update public.alerts set read_at = now() where kind = 'price_drop';
+  update alerts set read_at = now() where kind = 'price_drop';
 end $$;

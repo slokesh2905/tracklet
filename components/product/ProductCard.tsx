@@ -34,7 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { DashboardProduct } from "@/lib/data";
-import type { CollectionRow } from "@/lib/database.types";
+import type { CollectionRow } from "@/lib/db/schema";
 import { formatPercent, formatPrice, hostname, percentChange, timeAgo } from "@/lib/format";
 
 type Props = {

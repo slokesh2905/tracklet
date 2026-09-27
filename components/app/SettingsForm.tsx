@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { SUPPORTED_CURRENCIES, type CurrencyCode } from "@/lib/currency";
-import type { UserSettingsRow } from "@/lib/database.types";
+import type { UserSettingsRow } from "@/lib/db/schema";
 
 type Props = {
   email: string;

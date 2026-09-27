@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { isAuthorizedCron } from "@/lib/cron-auth";
+import { db } from "@/lib/db";
+import { checkRuns } from "@/lib/db/schema";
 import { serverEnv } from "@/lib/env";
 import { runPriceCheck } from "@/lib/pipeline";
-import { createSupabasePipelineStore } from "@/lib/pipeline-store";
+import { createDbPipelineStore } from "@/lib/pipeline-store";
 import { createFirecrawlScraper } from "@/lib/scraper";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 export const maxDuration = 300;
 
@@ -13,26 +15,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = createAdminClient();
   const started = Date.now();
-  const { data: run } = await supabase
-    .from("check_runs")
-    .insert({})
-    .select("id")
-    .single();
+  const [run] = await db.insert(checkRuns).values({}).returning({ id: checkRuns.id });
 
   try {
     const summary = await runPriceCheck(
       createFirecrawlScraper(serverEnv("FIRECRAWL_API_KEY")),
-      createSupabasePipelineStore(supabase),
+      createDbPipelineStore(),
       // Leave headroom under maxDuration for in-flight scrapes to finish.
       { budgetMs: 240_000 }
     );
 
     if (run) {
-      await supabase
-        .from("check_runs")
-        .update({
+      await db
+        .update(checkRuns)
+        .set({
           finished_at: new Date().toISOString(),
           duration_ms: Date.now() - started,
           products_checked: summary.productsChecked,
@@ -41,7 +38,7 @@ export async function GET(request: Request) {
           alerts_sent: summary.alertsSent,
           failures: summary.failures,
         })
-        .eq("id", run.id);
+        .where(eq(checkRuns.id, run.id));
     }
 
     return NextResponse.json({ ok: true, durationMs: Date.now() - started, ...summary });

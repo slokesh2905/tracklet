@@ -1,0 +1,14 @@
+# Local Postgres for development and E2E tests. Production uses Neon.
+services:
+  db:
+    image: postgres:17-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: tracklet
+      POSTGRES_PASSWORD: tracklet
+      POSTGRES_DB: tracklet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracklet"]
+      interval: 2s
+      retries: 30

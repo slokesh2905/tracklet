@@ -1,7 +1,7 @@
 import "server-only";
 import { generateText, Output } from "ai";
 import { z } from "zod";
-import type { Verdict } from "@/lib/database.types";
+import type { Verdict } from "@/lib/db/schema";
 import { serverEnv } from "@/lib/env";
 import { formatPrice } from "@/lib/format";
 import type { Insights } from "@/lib/insights";

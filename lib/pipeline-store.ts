@@ -1,55 +1,61 @@
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/database.types";
+import { eq, not, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { alerts, priceHistory, products, user, userSettings } from "@/lib/db/schema";
 import { deliverAlert, type AlertRecipient } from "@/lib/notify";
 import type { PipelineProduct, PipelineStore } from "@/lib/pipeline";
 
-const PRODUCT_COLUMNS =
-  "id, user_id, url, name, current_price, currency, image_url, in_stock, target_price, alert_pct, lowest_price, fail_count";
-
-/** Look up a user's email + notification settings (service role). */
-export async function loadRecipient(
-  supabase: SupabaseClient<Database>,
-  userId: string
-): Promise<AlertRecipient> {
-  const [{ data: userData }, { data: settings }] = await Promise.all([
-    supabase.auth.admin.getUserById(userId),
-    supabase
-      .from("user_settings")
-      .select("email_alerts, discord_webhook_url")
-      .eq("user_id", userId)
-      .maybeSingle(),
-  ]);
+/** A user's email + notification settings (defaults when they never saved settings). */
+export async function loadRecipient(userId: string): Promise<AlertRecipient> {
+  const [row] = await db
+    .select({
+      email: user.email,
+      emailAlerts: userSettings.email_alerts,
+      discordWebhookUrl: userSettings.discord_webhook_url,
+    })
+    .from(user)
+    .leftJoin(userSettings, eq(userSettings.user_id, user.id))
+    .where(eq(user.id, userId));
 
   return {
-    email: userData.user?.email ?? null,
-    emailAlerts: settings?.email_alerts ?? true,
-    discordWebhookUrl: settings?.discord_webhook_url ?? null,
+    email: row?.email ?? null,
+    emailAlerts: row?.emailAlerts ?? true,
+    discordWebhookUrl: row?.discordWebhookUrl ?? null,
   };
 }
 
-export function createSupabasePipelineStore(
-  supabase: SupabaseClient<Database>
-): PipelineStore {
+export function createDbPipelineStore(): PipelineStore {
   const recipients = new Map<string, Promise<AlertRecipient>>();
 
   return {
     async dueProducts(limit) {
-      const { data, error } = await supabase
-        .from("products")
-        .select(PRODUCT_COLUMNS)
-        .eq("paused", false)
-        .order("last_checked_at", { ascending: true, nullsFirst: true })
+      return db
+        .select({
+          id: products.id,
+          user_id: products.user_id,
+          url: products.url,
+          name: products.name,
+          current_price: products.current_price,
+          currency: products.currency,
+          image_url: products.image_url,
+          in_stock: products.in_stock,
+          target_price: products.target_price,
+          alert_pct: products.alert_pct,
+          lowest_price: products.lowest_price,
+          fail_count: products.fail_count,
+        })
+        .from(products)
+        .where(not(products.paused))
+        // Never-checked products first, then the stalest (matches products_stalest_idx).
+        .orderBy(sql`${products.last_checked_at} asc nulls first`)
         .limit(limit);
-      if (error) throw error;
-      return (data ?? []) as PipelineProduct[];
     },
 
     async saveResult(product, scraped, priceChanged) {
       const stockChanged = product.in_stock !== scraped.inStock;
-      const { error } = await supabase
-        .from("products")
-        .update({
+      await db
+        .update(products)
+        .set({
           current_price: scraped.price,
           original_price: scraped.originalPrice,
           currency: scraped.currency,
@@ -59,11 +65,10 @@ export function createSupabasePipelineStore(
           last_error: null,
           fail_count: 0,
         })
-        .eq("id", product.id);
-      if (error) throw error;
+        .where(eq(products.id, product.id));
 
       if (priceChanged || stockChanged) {
-        await supabase.from("price_history").insert({
+        await db.insert(priceHistory).values({
           product_id: product.id,
           price: scraped.price,
           currency: scraped.currency,
@@ -73,21 +78,21 @@ export function createSupabasePipelineStore(
     },
 
     async saveFailure(product, message, pause) {
-      await supabase
-        .from("products")
-        .update({
+      await db
+        .update(products)
+        .set({
           last_error: message.slice(0, 500),
           fail_count: product.fail_count + 1,
           last_checked_at: new Date().toISOString(),
           paused: pause,
         })
-        .eq("id", product.id);
+        .where(eq(products.id, product.id));
     },
 
     async deliverAlert(event) {
       let recipient = recipients.get(event.product.user_id);
       if (!recipient) {
-        recipient = loadRecipient(supabase, event.product.user_id);
+        recipient = loadRecipient(event.product.user_id);
         recipients.set(event.product.user_id, recipient);
       }
 
@@ -105,7 +110,7 @@ export function createSupabasePipelineStore(
         await recipient
       );
 
-      await supabase.from("alerts").insert({
+      await db.insert(alerts).values({
         user_id: event.product.user_id,
         product_id: event.product.id,
         kind: event.kind,

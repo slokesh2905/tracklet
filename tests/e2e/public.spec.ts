@@ -58,8 +58,11 @@ test.describe("signed out", () => {
     expect(res.status()).toBe(401);
   });
 
-  test("auth callback refuses off-site redirects", async ({ page }) => {
-    await page.goto("/auth/callback?next=//evil.example");
-    await expect(page).toHaveURL(/\/auth\/error$/);
+  test("sign-in refuses off-site callback URLs", async ({ request, baseURL }) => {
+    const res = await request.post("/api/auth/sign-in/magic-link", {
+      data: { email: "someone@tracklet.dev", callbackURL: "https://evil.example/steal" },
+      headers: { origin: baseURL! },
+    });
+    expect(res.status()).toBe(403);
   });
 });

@@ -14,10 +14,9 @@ jobs:
     name: Lint, typecheck, unit tests, build
     runs-on: ubuntu-latest
     env:
-      # Build-time public config only; no real services are contacted.
-      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+      # The build never connects to a database; auth only needs a non-default secret.
       NEXT_PUBLIC_APP_URL: http://localhost:3000
+      BETTER_AUTH_SECRET: ci-build-placeholder-secret-0123456789abcdef
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,13 +27,33 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - name: Migrations match the schema (no un-generated changes)
+        run: |
+          npx drizzle-kit check
+          npx drizzle-kit generate
+          test -z "$(git status --porcelain -- drizzle)" || { echo "::error::lib/db/schema.ts changed without a migration. Run npm run db:generate."; exit 1; }
+        env:
+          DATABASE_URL: postgres://unused@localhost/unused
       - run: npm run build
 
   e2e:
-    name: E2E (desktop + iPhone + Pixel) against local Supabase
+    name: E2E (desktop + iPhone + Pixel) against Postgres
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tracklet
+          POSTGRES_PASSWORD: tracklet
+          POSTGRES_DB: tracklet
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U tracklet"
+          --health-interval 2s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,15 +61,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-      - name: Start Supabase (applies migrations + seed)
-        run: supabase start -x vector,logflare,edge-runtime,imgproxy,studio,postgres-meta
       - run: npx playwright install --with-deps chromium webkit
+      # Global setup migrates + seeds the database before the tests run.
       - run: npx playwright test
-        env:
-          SUPABASE_BIN: supabase
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

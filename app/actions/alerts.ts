@@ -1,15 +1,20 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { ActionResult } from "@/lib/action-result";
-import { createClient } from "@/lib/supabase/server";
+import { and, eq, isNull } from "drizzle-orm";
+import { fail, type ActionResult } from "@/lib/action-result";
+import { db } from "@/lib/db";
+import { alerts } from "@/lib/db/schema";
+import { getUser } from "@/lib/session";
 
 export async function markAllAlertsRead(): Promise<ActionResult> {
-  const supabase = await createClient();
-  await supabase
-    .from("alerts")
-    .update({ read_at: new Date().toISOString() })
-    .is("read_at", null);
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+
+  await db
+    .update(alerts)
+    .set({ read_at: new Date().toISOString() })
+    .where(and(eq(alerts.user_id, user.id), isNull(alerts.read_at)));
   revalidatePath("/", "layout");
   return { ok: true };
 }
