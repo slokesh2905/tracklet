@@ -1,12 +1,25 @@
 import { z } from "zod";
 
-// Public vars are inlined at build time, so they must be referenced literally.
+/**
+ * The app's public origin. An explicit NEXT_PUBLIC_APP_URL wins; on Vercel it
+ * falls back to the system variables: the production domain for production,
+ * and the deployment's own URL for previews (so preview auth stays on preview).
+ */
+function appUrl() {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  const host =
+    process.env.VERCEL_ENV === "production"
+      ? process.env.VERCEL_PROJECT_PRODUCTION_URL
+      : process.env.VERCEL_URL;
+  return host ? `https://${host}` : undefined;
+}
+
 export const env = z
   .object({
     NEXT_PUBLIC_APP_URL: z.url().default("http://localhost:3000"),
   })
   .parse({
-    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || undefined,
+    NEXT_PUBLIC_APP_URL: appUrl(),
   });
 
 const serverSchema = z.object({
