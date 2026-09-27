@@ -6,6 +6,8 @@
 
 Track prices from any online store, see an honest price history, and get alerted the moment a product hits the price you want.
 
+**[Live demo → tracklet-seven.vercel.app](https://tracklet-seven.vercel.app)** · sign in with Google
+
 [![CI](https://github.com/slokesh2905/tracklet/actions/workflows/ci.yml/badge.svg)](https://github.com/slokesh2905/tracklet/actions/workflows/ci.yml)
 ![Next.js 16](https://img.shields.io/badge/Next.js-16-black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
