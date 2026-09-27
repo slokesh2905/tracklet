@@ -58,7 +58,8 @@ export async function deliverAlert(
     jobs.push(
       sendEmail({
         to: recipient.email,
-        subject: `${copy.emoji} ${copy.title}: ${message.productName.slice(0, 80)}`,
+        // No emoji in the subject: it correlates with promotions/spam filtering.
+        subject: `${copy.title}: ${message.productName.slice(0, 80)}`,
         react: createElement(PriceAlertEmail, { ...message, detailUrl, settingsUrl }),
         unsubscribeUrl: settingsUrl,
       }).then(() => void delivered.push("email"))
