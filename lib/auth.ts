@@ -7,7 +7,7 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import MagicLinkEmail from "@/emails/MagicLinkEmail";
 import { db, schema } from "@/lib/db";
 import { env } from "@/lib/env";
-import { sendEmail } from "@/lib/notify";
+import { sendEmail } from "@/lib/mailer";
 
 function socialProviders() {
   const providers: Parameters<typeof betterAuth>[0]["socialProviders"] = {};
@@ -50,8 +50,11 @@ export const auth = betterAuth({
     magicLink({
       expiresIn: 15 * 60,
       async sendMagicLink({ email, url }) {
-        await sendEmail(email, "Your Tracklet sign-in link", createElement(MagicLinkEmail, { url }), {
-          magicLink: url,
+        await sendEmail({
+          to: email,
+          subject: "Your Tracklet sign-in link",
+          react: createElement(MagicLinkEmail, { url }),
+          meta: { magicLink: url },
         });
       },
     }),

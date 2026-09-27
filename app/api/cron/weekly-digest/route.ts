@@ -8,7 +8,7 @@ import { products, userSettings } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { DAY_MS, percentChange } from "@/lib/format";
 import { computeInsights } from "@/lib/insights";
-import { sendEmail } from "@/lib/notify";
+import { sendEmail } from "@/lib/mailer";
 import { loadRecipient } from "@/lib/pipeline-store";
 
 export const maxDuration = 300;
@@ -58,15 +58,17 @@ export async function GET(request: Request) {
     if (!recipient.email) continue;
     items.sort((a, b) => a.weekChangePct - b.weekChangePct);
     try {
-      await sendEmail(
-        recipient.email,
-        "Your week in prices",
-        createElement(WeeklyDigestEmail, {
+      const settingsUrl = `${env.NEXT_PUBLIC_APP_URL}/settings`;
+      await sendEmail({
+        to: recipient.email,
+        subject: "Your week in prices",
+        react: createElement(WeeklyDigestEmail, {
           items: items.slice(0, 25),
           dashboardUrl: `${env.NEXT_PUBLIC_APP_URL}/dashboard`,
-          settingsUrl: `${env.NEXT_PUBLIC_APP_URL}/settings`,
-        })
-      );
+          settingsUrl,
+        }),
+        unsubscribeUrl: settingsUrl,
+      });
       sent++;
     } catch (err) {
       console.error(`Digest to ${userId} failed:`, err);

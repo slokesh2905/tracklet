@@ -33,7 +33,7 @@ Track prices from any online store, see an honest price history, and get alerted
 ## Features
 
 - **Track any store.** Paste a link (or 20 at once). Firecrawl extracts name, price, currency, stock and list price, with an LLM fallback when structured extraction fails.
-- **Smart alerts.** Set a target price or a minimum % drop. You're alerted when the price *crosses* the target, when it hits a new all-time low, or when an item is back in stock. Delivery by email (React Email + Resend) and Discord webhook, plus a weekly digest.
+- **Smart alerts.** Set a target price or a minimum % drop. You're alerted when the price *crosses* the target, when it hits a new all-time low, or when an item is back in stock. Delivery by email (React Email via Gmail SMTP, or Resend) and Discord webhook, plus a weekly digest.
 - **Honest price insights.** Step-function charts with 7D/30D/90D/All ranges, time-weighted averages, 30/90-day ranges, a regression trend, and a **0–100 deal score**.
 - **AI "buy now or wait?" verdict.** Structured output from the Vercel AI SDK, grounded only in computed statistics, cached per price and rate-limited per user in Postgres.
 - **Collections & sharing.** Group products into wishlists. Public product and collection pages are cached with ISR and get generated Open Graph images.
@@ -74,7 +74,7 @@ flowchart LR
 
 ## Tech stack
 
-Next.js 16 (App Router, Server Actions, ISR, `next/og`) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui · Recharts · Neon Postgres · Drizzle ORM · Better Auth · Firecrawl · Vercel AI SDK 7 + AI Gateway · Resend + React Email · Zod · Vitest · Playwright · Vercel (Cron, Fluid Compute)
+Next.js 16 (App Router, Server Actions, ISR, `next/og`) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui · Recharts · Neon Postgres · Drizzle ORM · Better Auth · Firecrawl · Vercel AI SDK 7 + AI Gateway · React Email + Nodemailer (Gmail) / Resend · Zod · Vitest · Playwright · Vercel (Cron, Fluid Compute)
 
 ## Data model
 
@@ -103,11 +103,11 @@ npm run db:seed      # migrate + demo data (refuses non-local databases)
 npm run dev
 ```
 
-Sign in as `demo@tracklet.dev`. Without a Resend key, the magic link is printed in the dev server console.
+Sign in as `demo@tracklet.dev`. With no email provider configured, the magic link is printed in the dev server console.
 
 `.env.development.local` takes priority over `.env.local` during `next dev`, so local work never touches the production database that `vercel env pull` writes into `.env.local`.
 
-To add real products you need a [Firecrawl](https://firecrawl.dev) key. Email alerts need a [Resend](https://resend.com) key. AI features need an [AI Gateway](https://vercel.com/ai-gateway) key locally; on Vercel they use OIDC automatically.
+To add real products you need a [Firecrawl](https://firecrawl.dev) key. Email (alerts and magic links) goes through Gmail with an [app password](https://myaccount.google.com/apppasswords), which is free with no domain needed, or through Resend if you have a verified domain. AI features need an [AI Gateway](https://vercel.com/ai-gateway) key locally; on Vercel they use OIDC automatically.
 
 ### Tests
 
@@ -126,7 +126,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/chec
 ## Deploying
 
 1. `vercel link`, then `vercel integration add neon` provisions Postgres and injects `DATABASE_URL` / `DATABASE_URL_UNPOOLED`.
-2. Set `BETTER_AUTH_SECRET`, `CRON_SECRET`, `FIRECRAWL_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` and `NEXT_PUBLIC_APP_URL` with `vercel env add`.
+2. Set `BETTER_AUTH_SECRET`, `CRON_SECRET`, `FIRECRAWL_API_KEY` and an email provider (`GMAIL_USER` + `GMAIL_APP_PASSWORD`, or `RESEND_API_KEY` + `RESEND_FROM_EMAIL`) with `vercel env add`. The app URL comes from Vercel's system variables.
 3. Optional: create Google and GitHub OAuth apps with the callback `https://<your-domain>/api/auth/callback/{google|github}` and add their IDs and secrets.
 4. `vercel deploy --prod`. The build applies migrations, and the crons in [vercel.ts](vercel.ts) register automatically.
 
