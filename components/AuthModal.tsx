@@ -87,6 +87,10 @@ export default function AuthModal({ open, onOpenChange, next = "/dashboard" }: P
             <p className="mt-1 text-muted-foreground">
               We sent a sign-in link to <span className="font-medium text-foreground">{email}</span>.
             </p>
+            <p className="mt-2 text-muted-foreground">
+              Not there after a minute? Check <span className="font-medium text-foreground">Spam</span> or{" "}
+              <span className="font-medium text-foreground">Promotions</span> for an email from Tracklet.
+            </p>
             <Button variant="link" className="mt-2 h-auto p-0" onClick={() => setSent(false)}>
               Use a different email
             </Button>
