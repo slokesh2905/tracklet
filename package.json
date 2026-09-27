@@ -16,7 +16,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db.ts migrate",
     "db:seed": "tsx scripts/db.ts seed",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "ai:smoke": "node --conditions=react-server --import tsx scripts/ai-smoke.mts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.57",
