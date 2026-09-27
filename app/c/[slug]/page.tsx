@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ImageOff } from "lucide-react";
 import PublicShell from "@/components/PublicShell";
 import { formatPrice, hostname } from "@/lib/format";
-import { getSharedCollection } from "@/lib/supabase/public";
+import { getSharedCollection } from "@/lib/share";
 
 export const revalidate = 3600;
 

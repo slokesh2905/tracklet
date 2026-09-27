@@ -2,6 +2,7 @@
 
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
+import { and, asc, desc, eq, gte } from "drizzle-orm";
 import { fail, type ActionResult } from "@/lib/action-result";
 import {
   categorizeProduct,
@@ -9,21 +10,14 @@ import {
   generateDealVerdict,
   isAiEnabled,
 } from "@/lib/ai";
+import { db } from "@/lib/db";
+import { priceHistory, productInsights, products } from "@/lib/db/schema";
 import { serverEnv } from "@/lib/env";
 import { computeInsights } from "@/lib/insights";
-import {
-  createFirecrawlScraper,
-  ScrapeError,
-  type ScrapedProduct,
-} from "@/lib/scraper";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient, getUser } from "@/lib/supabase/server";
-import {
-  alertRulesSchema,
-  firstIssue,
-  productUrlSchema,
-  uuidSchema,
-} from "@/lib/validation";
+import { consumeAiQuota, ownsCollection } from "@/lib/ownership";
+import { createFirecrawlScraper, ScrapeError, type ScrapedProduct } from "@/lib/scraper";
+import { getUser } from "@/lib/session";
+import { alertRulesSchema, firstIssue, productUrlSchema, uuidSchema } from "@/lib/validation";
 
 /** A scrape of the same URL by anyone within this window is reused instead of re-fetched. */
 const FRESH_SCRAPE_MS = 6 * 60 * 60 * 1000;
@@ -32,6 +26,10 @@ function revalidateApp() {
   revalidatePath("/dashboard");
   revalidatePath("/collections");
 }
+
+/** Scopes a product query to its owner; every write below goes through this. */
+const owned = (productId: string, userId: string) =>
+  and(eq(products.id, productId), eq(products.user_id, userId));
 
 async function scrapeWithFallback(url: string): Promise<ScrapedProduct> {
   const scraper = createFirecrawlScraper(serverEnv("FIRECRAWL_API_KEY"));
@@ -46,30 +44,25 @@ async function scrapeWithFallback(url: string): Promise<ScrapedProduct> {
   }
 }
 
-/** Reuse a recent scrape of this exact URL (any user) to save a paid scrape call. */
+/** Reuse a recent scrape of this exact URL (any user) to save a paid scrape call. Only price data is read. */
 async function findFreshScrape(url: string): Promise<ScrapedProduct | null> {
-  try {
-    const admin = createAdminClient();
-    const { data } = await admin
-      .from("products")
-      .select("name, current_price, currency, image_url, in_stock, original_price, last_checked_at")
-      .eq("url", url)
-      .gte("last_checked_at", new Date(Date.now() - FRESH_SCRAPE_MS).toISOString())
-      .order("last_checked_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!data) return null;
-    return {
-      name: data.name,
-      price: Number(data.current_price),
-      currency: data.currency,
-      imageUrl: data.image_url,
-      inStock: data.in_stock,
-      originalPrice: data.original_price === null ? null : Number(data.original_price),
-    };
-  } catch {
-    return null; // Service key missing locally: just scrape.
-  }
+  const row = await db.query.products.findFirst({
+    columns: { name: true, current_price: true, currency: true, image_url: true, in_stock: true, original_price: true },
+    where: and(
+      eq(products.url, url),
+      gte(products.last_checked_at, new Date(Date.now() - FRESH_SCRAPE_MS).toISOString())
+    ),
+    orderBy: desc(products.last_checked_at),
+  });
+  if (!row) return null;
+  return {
+    name: row.name,
+    price: row.current_price,
+    currency: row.currency,
+    imageUrl: row.image_url,
+    inStock: row.in_stock,
+    originalPrice: row.original_price,
+  };
 }
 
 export async function addProduct(
@@ -82,8 +75,7 @@ export async function addProduct(
 
   const user = await getUser();
   if (!user) return fail("Please sign in first");
-
-  const supabase = await createClient();
+  if (collectionId && !(await ownsCollection(user.id, collectionId))) return fail("Collection not found");
 
   let scraped: ScrapedProduct;
   try {
@@ -92,48 +84,43 @@ export async function addProduct(
     return fail(error instanceof Error ? error.message : "Couldn't read that page");
   }
 
-  const { data: existing } = await supabase
-    .from("products")
-    .select("id, current_price, in_stock")
-    .eq("url", url)
-    .maybeSingle();
+  const existing = await db.query.products.findFirst({
+    columns: { id: true, current_price: true, in_stock: true },
+    where: and(eq(products.user_id, user.id), eq(products.url, url)),
+  });
 
-  const now = new Date().toISOString();
-  const { data: product, error } = await supabase
-    .from("products")
-    .upsert(
-      {
-        user_id: user.id,
-        url,
-        name: scraped.name,
-        current_price: scraped.price,
-        original_price: scraped.originalPrice,
-        currency: scraped.currency,
-        image_url: scraped.imageUrl,
-        in_stock: scraped.inStock,
-        last_checked_at: now,
-        last_error: null,
-        fail_count: 0,
-        paused: false,
-        ...(collectionId ? { collection_id: collectionId } : {}),
-      },
-      { onConflict: "user_id,url" }
-    )
-    .select("id")
-    .single();
+  const fields = {
+    name: scraped.name,
+    current_price: scraped.price,
+    original_price: scraped.originalPrice,
+    currency: scraped.currency,
+    image_url: scraped.imageUrl,
+    in_stock: scraped.inStock,
+    last_checked_at: new Date().toISOString(),
+    last_error: null,
+    fail_count: 0,
+    paused: false,
+    ...(collectionId ? { collection_id: collectionId } : {}),
+  };
 
-  if (error || !product) {
+  let productId: string;
+  try {
+    const [row] = await db
+      .insert(products)
+      .values({ user_id: user.id, url, ...fields })
+      .onConflictDoUpdate({ target: [products.user_id, products.url], set: fields })
+      .returning({ id: products.id });
+    productId = row!.id;
+  } catch (error) {
     console.error("addProduct upsert failed:", error);
     return fail("Couldn't save that product. Please try again.");
   }
 
   const changed =
-    !existing ||
-    Number(existing.current_price) !== scraped.price ||
-    existing.in_stock !== scraped.inStock;
+    !existing || existing.current_price !== scraped.price || existing.in_stock !== scraped.inStock;
   if (changed) {
-    await supabase.from("price_history").insert({
-      product_id: product.id,
+    await db.insert(priceHistory).values({
+      product_id: productId,
       price: scraped.price,
       currency: scraped.currency,
       in_stock: scraped.inStock,
@@ -145,7 +132,7 @@ export async function addProduct(
     after(async () => {
       try {
         const category = await categorizeProduct(scraped.name);
-        await createAdminClient().from("products").update({ category }).eq("id", product.id);
+        await db.update(products).set({ category }).where(eq(products.id, productId));
       } catch (err) {
         console.error("Categorize failed:", err);
       }
@@ -155,7 +142,7 @@ export async function addProduct(
   revalidateApp();
   return {
     ok: true,
-    productId: product.id,
+    productId,
     updated: Boolean(existing),
     message: existing ? "Price refreshed" : `Now tracking ${scraped.name.slice(0, 60)}`,
   };
@@ -163,18 +150,23 @@ export async function addProduct(
 
 export async function deleteProduct(productId: string): Promise<ActionResult> {
   if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
-  const supabase = await createClient();
-  const { error } = await supabase.from("products").delete().eq("id", productId);
-  if (error) return fail("Couldn't remove that product");
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+
+  const deleted = await db.delete(products).where(owned(productId, user.id)).returning({ id: products.id });
+  if (deleted.length === 0) return fail("Product not found");
   revalidateApp();
   return { ok: true, message: "Stopped tracking" };
 }
 
 export async function refreshProduct(productId: string) {
-  const supabase = await createClient();
-  const { data } = await supabase.from("products").select("url").eq("id", productId).maybeSingle();
-  if (!data) return fail("Product not found");
-  const result = await addProduct(data.url);
+  if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+
+  const row = await db.query.products.findFirst({ columns: { url: true }, where: owned(productId, user.id) });
+  if (!row) return fail("Product not found");
+  const result = await addProduct(row.url);
   revalidatePath(`/products/${productId}`);
   return result;
 }
@@ -186,13 +178,15 @@ export async function updateAlertRules(input: {
 }): Promise<ActionResult> {
   const parsed = alertRulesSchema.safeParse(input);
   if (!parsed.success) return fail(firstIssue(parsed.error));
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
 
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("products")
-    .update({ target_price: parsed.data.targetPrice, alert_pct: parsed.data.alertPct })
-    .eq("id", parsed.data.productId);
-  if (error) return fail("Couldn't save alert rules");
+  const updated = await db
+    .update(products)
+    .set({ target_price: parsed.data.targetPrice, alert_pct: parsed.data.alertPct })
+    .where(owned(parsed.data.productId, user.id))
+    .returning({ id: products.id });
+  if (updated.length === 0) return fail("Product not found");
 
   revalidateApp();
   revalidatePath(`/products/${parsed.data.productId}`);
@@ -203,41 +197,55 @@ export async function setProductPublic(
   productId: string,
   isPublic: boolean
 ): Promise<ActionResult<{ slug: string }>> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("products")
-    .update({ is_public: isPublic })
-    .eq("id", productId)
-    .select("share_slug")
-    .single();
-  if (error || !data) return fail("Couldn't update sharing");
+  if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+
+  const [row] = await db
+    .update(products)
+    .set({ is_public: isPublic })
+    .where(owned(productId, user.id))
+    .returning({ slug: products.share_slug });
+  if (!row) return fail("Couldn't update sharing");
+
   revalidatePath(`/products/${productId}`);
   // Public pages are cached; making one private must take effect immediately.
-  revalidatePath(`/p/${data.share_slug}`);
-  return { ok: true, slug: data.share_slug };
+  revalidatePath(`/p/${row.slug}`);
+  return { ok: true, slug: row.slug };
 }
 
 export async function moveToCollection(
   productId: string,
   collectionId: string | null
 ): Promise<ActionResult> {
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("products")
-    .update({ collection_id: collectionId })
-    .eq("id", productId);
-  if (error) return fail("Couldn't move that product");
+  if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+  if (collectionId && !(await ownsCollection(user.id, collectionId))) return fail("Collection not found");
+
+  const updated = await db
+    .update(products)
+    .set({ collection_id: collectionId })
+    .where(owned(productId, user.id))
+    .returning({ id: products.id });
+  if (updated.length === 0) return fail("Couldn't move that product");
+
   revalidateApp();
   return { ok: true, message: collectionId ? "Added to collection" : "Removed from collection" };
 }
 
 export async function resumeChecks(productId: string): Promise<ActionResult> {
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("products")
-    .update({ paused: false, fail_count: 0, last_error: null })
-    .eq("id", productId);
-  if (error) return fail("Couldn't resume checks");
+  if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+
+  const updated = await db
+    .update(products)
+    .set({ paused: false, fail_count: 0, last_error: null })
+    .where(owned(productId, user.id))
+    .returning({ id: products.id });
+  if (updated.length === 0) return fail("Couldn't resume checks");
+
   revalidateApp();
   revalidatePath(`/products/${productId}`);
   return { ok: true, message: "Daily checks resumed" };
@@ -245,46 +253,44 @@ export async function resumeChecks(productId: string): Promise<ActionResult> {
 
 export async function generateVerdict(productId: string): Promise<ActionResult> {
   if (!isAiEnabled()) return fail("AI insights aren't configured on this deployment");
+  if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
 
-  const supabase = await createClient();
-  const { data: product } = await supabase
-    .from("products")
-    .select("id, name, current_price, currency, original_price, in_stock, price_history(price, checked_at)")
-    .eq("id", productId)
-    .maybeSingle();
+  const product = await db.query.products.findFirst({
+    where: owned(productId, user.id),
+    with: { priceHistory: { columns: { price: true, checked_at: true }, orderBy: asc(priceHistory.checked_at) } },
+  });
   if (!product) return fail("Product not found");
 
-  const { data: allowed } = await supabase.rpc("consume_ai_quota", {
-    daily_limit: serverEnv("AI_DAILY_LIMIT"),
-  });
-  if (!allowed) return fail("Daily AI limit reached. Try again tomorrow.");
+  if (!(await consumeAiQuota(user.id, serverEnv("AI_DAILY_LIMIT")))) {
+    return fail("Daily AI limit reached. Try again tomorrow.");
+  }
 
   try {
-    const current = Number(product.current_price);
-    const insights = computeInsights(
-      product.price_history.map((h) => ({ price: Number(h.price), checked_at: h.checked_at })),
-      current
-    );
+    const insights = computeInsights(product.priceHistory, product.current_price);
     const verdict = await generateDealVerdict({
       name: product.name,
-      currentPrice: current,
+      currentPrice: product.current_price,
       currency: product.currency,
-      originalPrice: product.original_price === null ? null : Number(product.original_price),
+      originalPrice: product.original_price,
       inStock: product.in_stock,
       insights,
     });
 
-    const { error } = await supabase.from("product_insights").upsert({
-      product_id: product.id,
+    const values = {
       verdict: verdict.verdict,
       confidence: Math.round(verdict.confidence * 100) / 100,
       summary: verdict.summary,
       reasons: verdict.reasons,
-      price_at_generation: current,
+      price_at_generation: product.current_price,
       model: serverEnv("AI_MODEL"),
       generated_at: new Date().toISOString(),
-    });
-    if (error) throw error;
+    };
+    await db
+      .insert(productInsights)
+      .values({ product_id: product.id, ...values })
+      .onConflictDoUpdate({ target: productInsights.product_id, set: values });
   } catch (error) {
     console.error("Verdict failed:", error);
     return fail("Couldn't generate a verdict right now");

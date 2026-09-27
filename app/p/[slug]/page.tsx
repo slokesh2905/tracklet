@@ -8,7 +8,7 @@ import PriceChart from "@/components/product/PriceChart";
 import { Button } from "@/components/ui/button";
 import { formatPrice, hostname } from "@/lib/format";
 import { computeInsights } from "@/lib/insights";
-import { getSharedProduct } from "@/lib/supabase/public";
+import { getSharedProduct } from "@/lib/share";
 
 export const revalidate = 3600;
 

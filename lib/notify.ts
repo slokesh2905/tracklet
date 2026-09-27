@@ -1,7 +1,7 @@
 import "server-only";
 import { createElement, type ReactElement } from "react";
 import { Resend } from "resend";
-import type { AlertKind } from "@/lib/database.types";
+import type { AlertKind } from "@/lib/db/schema";
 import { ALERT_COPY } from "@/lib/alerts";
 import { env, serverEnv } from "@/lib/env";
 import { formatPercent, formatPrice, percentChange } from "@/lib/format";
@@ -9,7 +9,29 @@ import PriceAlertEmail from "@/emails/PriceAlertEmail";
 
 let resend: Resend | null = null;
 
-export async function sendEmail(to: string, subject: string, react: ReactElement) {
+/**
+ * Send an email through Resend. Two non-production escape hatches:
+ * - EMAIL_OUTBOX_FILE: append the message as a JSON line instead (E2E tests read it).
+ *   Ignored on Vercel, so a stray variable can never swallow real emails.
+ * - No RESEND_API_KEY in development: log it, so sign-in links still work locally.
+ */
+export async function sendEmail(
+  to: string,
+  subject: string,
+  react: ReactElement,
+  meta: Record<string, string> = {}
+) {
+  const outbox = process.env.EMAIL_OUTBOX_FILE;
+  if (outbox && !process.env.VERCEL) {
+    const { appendFile } = await import("node:fs/promises");
+    await appendFile(outbox, JSON.stringify({ to, subject, meta, at: Date.now() }) + "\n");
+    return;
+  }
+  if (!process.env.RESEND_API_KEY && process.env.NODE_ENV === "development") {
+    console.info(`[email] to=${to} subject="${subject}"`, meta);
+    return;
+  }
+
   resend ??= new Resend(serverEnv("RESEND_API_KEY"));
   const { error } = await resend.emails.send({
     from: serverEnv("RESEND_FROM_EMAIL"),

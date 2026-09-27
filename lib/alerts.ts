@@ -1,4 +1,4 @@
-import type { AlertKind } from "@/lib/database.types";
+import type { AlertKind } from "@/lib/db/schema";
 import { percentChange } from "@/lib/format";
 
 export type AlertInput = {

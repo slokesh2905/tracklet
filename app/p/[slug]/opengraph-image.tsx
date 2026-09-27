@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 import { formatPercent, formatPrice, hostname, percentChange } from "@/lib/format";
-import { getSharedProduct } from "@/lib/supabase/public";
+import { getSharedProduct } from "@/lib/share";
 
 export const alt = "Price history on Tracklet";
 export const size = { width: 1200, height: 630 };

@@ -1,34 +1,19 @@
-import { execSync } from "node:child_process";
+import { resolve } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * E2E runs against the local Supabase stack (`npx supabase start`) seeded by
- * supabase/seed.sql. Keys are read from `supabase status` so nothing is hard-coded.
+ * E2E runs against a local Postgres (`npm run db:up`), reset and seeded from
+ * scripts/seed.sql by the global setup. Magic-link emails are written to an
+ * outbox file instead of being sent, so tests sign in through the real flow.
  */
-function localSupabaseEnv(): Record<string, string> {
-  try {
-    const status = JSON.parse(
-      execSync(`${process.env.SUPABASE_BIN ?? "npx supabase"} status -o json`, { stdio: ["ignore", "pipe", "ignore"] }).toString()
-    ) as Record<string, string>;
-    return {
-      NEXT_PUBLIC_SUPABASE_URL: status.API_URL!,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: (status.PUBLISHABLE_KEY ?? status.ANON_KEY)!,
-      SUPABASE_SERVICE_ROLE_KEY: (status.SECRET_KEY ?? status.SERVICE_ROLE_KEY)!,
-      MAILPIT_URL: (status.MAILPIT_URL ?? status.INBUCKET_URL)!,
-    };
-  } catch {
-    throw new Error("Local Supabase isn't running. Start it with `npx supabase start`.");
-  }
-}
-
-const supabase = localSupabaseEnv();
-Object.assign(process.env, supabase);
-
 const PORT = 3100;
 const baseURL = `http://localhost:${PORT}`;
+const DATABASE_URL = process.env.E2E_DATABASE_URL ?? "postgres://tracklet:tracklet@localhost:5433/tracklet";
+export const OUTBOX = resolve("tests/e2e/.auth/outbox.jsonl");
 
 export default defineConfig({
   testDir: "tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -46,8 +31,12 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 240_000,
     env: {
-      ...supabase,
+      DATABASE_URL,
+      DATABASE_URL_UNPOOLED: DATABASE_URL,
       NEXT_PUBLIC_APP_URL: baseURL,
+      BETTER_AUTH_URL: baseURL,
+      BETTER_AUTH_SECRET: "e2e-only-secret-0123456789abcdef0123456789",
+      EMAIL_OUTBOX_FILE: OUTBOX,
       CRON_SECRET: "e2e-cron-secret-0123456789",
       FIRECRAWL_API_KEY: "fc-e2e-unused",
       RESEND_API_KEY: "re_e2e_unused",

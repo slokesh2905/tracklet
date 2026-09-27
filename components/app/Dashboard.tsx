@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import type { DashboardProduct, DashboardStats, ProductStatus } from "@/lib/data";
-import type { CollectionRow } from "@/lib/database.types";
+import type { CollectionRow } from "@/lib/db/schema";
 import { isGreatDeal } from "@/lib/deals";
 import { cn } from "@/lib/utils";
 

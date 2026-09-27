@@ -1,6 +1,6 @@
 import { Minus, Sparkles, Trophy, TrendingDown, TrendingUp } from "lucide-react";
 import type { ProductStatus } from "@/lib/data";
-import type { Verdict } from "@/lib/database.types";
+import type { Verdict } from "@/lib/db/schema";
 import { formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 

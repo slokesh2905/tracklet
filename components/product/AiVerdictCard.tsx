@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { generateVerdict } from "@/app/actions/products";
 import { VERDICT_COPY } from "@/components/product/Badges";
 import { Button } from "@/components/ui/button";
-import type { ProductInsightRow } from "@/lib/database.types";
+import type { ProductInsightRow } from "@/lib/db/schema";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 

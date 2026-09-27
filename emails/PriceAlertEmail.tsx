@@ -12,7 +12,7 @@ import {
   Section,
   Text,
 } from "@react-email/components";
-import type { AlertKind } from "@/lib/database.types";
+import type { AlertKind } from "@/lib/db/schema";
 import { ALERT_COPY } from "@/lib/alerts";
 import { formatPercent, formatPrice, percentChange } from "@/lib/format";
 

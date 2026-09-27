@@ -41,9 +41,9 @@ export default async function AlertsPage() {
               <li key={a.id} className={cn("border-b last:border-b-0", !a.read_at && "bg-primary/5")}>
                 <Link href={`/products/${a.product_id}`} className="flex items-center gap-3 p-3 hover:bg-accent/50 sm:p-4">
                   <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white">
-                    {a.products?.image_url ? (
+                    {a.product?.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={a.products.image_url} alt="" loading="lazy" className="size-full object-contain p-1" />
+                      <img src={a.product.image_url} alt="" loading="lazy" className="size-full object-contain p-1" />
                     ) : (
                       <ImageOff className="size-4 text-muted-foreground" />
                     )}
@@ -53,7 +53,7 @@ export default async function AlertsPage() {
                       {!a.read_at && <span className="size-2 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
                       {copy.emoji} {copy.title}
                     </p>
-                    <p className="truncate text-sm text-muted-foreground">{a.products?.name ?? "Deleted product"}</p>
+                    <p className="truncate text-sm text-muted-foreground">{a.product?.name ?? "Deleted product"}</p>
                     <p className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                       <span suppressHydrationWarning>{timeAgo(a.created_at)}</span>
                       {a.channels.includes("email") && <Mail className="size-3" aria-label="Sent by email" />}

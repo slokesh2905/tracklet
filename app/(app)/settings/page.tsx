@@ -1,6 +1,6 @@
 import SettingsForm from "@/components/app/SettingsForm";
 import { getSettings } from "@/lib/data";
-import { getUser } from "@/lib/supabase/server";
+import { getUser } from "@/lib/session";
 
 export const metadata = { title: "Settings" };
 

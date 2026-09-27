@@ -18,7 +18,7 @@ import SignInButton from "@/components/landing/SignInButton";
 import { Logo } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
 import { DAY_MS } from "@/lib/format";
-import { getUser } from "@/lib/supabase/server";
+import { getUser } from "@/lib/session";
 
 const FEATURES = [
   { icon: Target, title: "Target-price alerts", body: "Set the price you’d pay, or a % drop. We only ping you when it matters." },
@@ -136,7 +136,7 @@ export default async function Home() {
       <footer className="border-t pb-safe">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-muted-foreground sm:flex-row">
           <Logo className="text-foreground" />
-          <p>Built with Next.js, Supabase, Firecrawl and the Vercel AI SDK.</p>
+          <p>Built with Next.js, Neon Postgres, Drizzle, Better Auth and the Vercel AI SDK.</p>
         </div>
       </footer>
     </div>

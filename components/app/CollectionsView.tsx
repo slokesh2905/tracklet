@@ -28,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import type { CollectionRow, ProductRow } from "@/lib/database.types";
+import type { CollectionRow, ProductRow } from "@/lib/db/schema";
 import { formatPrice } from "@/lib/format";
 
 type Collection = CollectionRow & {

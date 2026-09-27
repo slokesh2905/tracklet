@@ -1,4 +1,4 @@
-import type { AlertKind, ProductRow } from "@/lib/database.types";
+import type { AlertKind, ProductRow } from "@/lib/db/schema";
 import { evaluateAlert } from "@/lib/alerts";
 import type { ScrapedProduct, Scraper } from "@/lib/scraper";
 

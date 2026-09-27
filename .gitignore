@@ -49,3 +49,8 @@ next-env.d.ts
 # supabase local
 /supabase/.branches
 /supabase/.temp
+
+# agent tooling installed by `vercel integration add`
+/.agents/
+/.claude/
+skills-lock.json

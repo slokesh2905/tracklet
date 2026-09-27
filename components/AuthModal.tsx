@@ -13,7 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { createClient } from "@/lib/supabase/client";
+import { authClient } from "@/lib/auth-client";
+
+/** Social providers configured at build time (see next.config.ts). */
+const SOCIAL = (process.env.NEXT_PUBLIC_AUTH_PROVIDERS ?? "").split(",").filter(Boolean);
 
 type Props = {
   open: boolean;
@@ -46,17 +49,15 @@ export default function AuthModal({ open, onOpenChange, next = "/dashboard" }: P
   const [pending, setPending] = useState<"google" | "github" | "email" | null>(null);
   const [sent, setSent] = useState(false);
 
-  const redirectTo = () =>
-    `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+  // Only same-origin relative paths; Better Auth also rejects untrusted callback origins.
+  const callbackURL = next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+  const errorCallbackURL = "/auth/error";
 
   async function signInWith(provider: "google" | "github") {
     setPending(provider);
-    const { error } = await createClient().auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: redirectTo() },
-    });
+    const { error } = await authClient.signIn.social({ provider, callbackURL, errorCallbackURL });
     if (error) {
-      toast.error(error.message);
+      toast.error(error.message ?? "Sign-in failed");
       setPending(null);
     }
   }
@@ -64,12 +65,9 @@ export default function AuthModal({ open, onOpenChange, next = "/dashboard" }: P
   async function sendMagicLink(e: React.FormEvent) {
     e.preventDefault();
     setPending("email");
-    const { error } = await createClient().auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo() },
-    });
+    const { error } = await authClient.signIn.magicLink({ email, callbackURL, errorCallbackURL });
     setPending(null);
-    if (error) toast.error(error.message);
+    if (error) toast.error(error.message ?? "Couldn't send the link");
     else setSent(true);
   }
 
@@ -95,20 +93,26 @@ export default function AuthModal({ open, onOpenChange, next = "/dashboard" }: P
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <Button variant="outline" size="lg" className="w-full gap-2" disabled={pending !== null} onClick={() => signInWith("google")}>
-              {pending === "google" ? <Loader2 className="size-4 animate-spin" /> : <GoogleIcon />}
-              Continue with Google
-            </Button>
-            <Button variant="outline" size="lg" className="w-full gap-2" disabled={pending !== null} onClick={() => signInWith("github")}>
-              {pending === "github" ? <Loader2 className="size-4 animate-spin" /> : <GitHubIcon />}
-              Continue with GitHub
-            </Button>
+            {SOCIAL.includes("google") && (
+              <Button variant="outline" size="lg" className="w-full gap-2" disabled={pending !== null} onClick={() => signInWith("google")}>
+                {pending === "google" ? <Loader2 className="size-4 animate-spin" /> : <GoogleIcon />}
+                Continue with Google
+              </Button>
+            )}
+            {SOCIAL.includes("github") && (
+              <Button variant="outline" size="lg" className="w-full gap-2" disabled={pending !== null} onClick={() => signInWith("github")}>
+                {pending === "github" ? <Loader2 className="size-4 animate-spin" /> : <GitHubIcon />}
+                Continue with GitHub
+              </Button>
+            )}
 
-            <div className="flex items-center gap-3 py-1 text-xs text-muted-foreground">
-              <Separator className="flex-1" />
-              or
-              <Separator className="flex-1" />
-            </div>
+            {SOCIAL.length > 0 && (
+              <div className="flex items-center gap-3 py-1 text-xs text-muted-foreground">
+                <Separator className="flex-1" />
+                or
+                <Separator className="flex-1" />
+              </div>
+            )}
 
             <form onSubmit={sendMagicLink} className="flex flex-col gap-2">
               <label htmlFor="auth-email" className="sr-only">Email</label>
