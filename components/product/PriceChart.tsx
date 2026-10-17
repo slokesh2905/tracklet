@@ -33,6 +33,10 @@ type Props = {
   targetPrice?: number | null;
   lowestPrice?: number | null;
   height?: number;
+  /** Chart height on a phone, where the design keeps it short. */
+  compactHeight?: number;
+  /** Shown above the change, beside the range buttons. */
+  title?: string;
   showRanges?: boolean;
   className?: string;
 };
@@ -48,6 +52,8 @@ export default function PriceChart({
   targetPrice,
   lowestPrice,
   height = 260,
+  compactHeight,
+  title,
   showRanges = true,
   className,
 }: Props) {
@@ -85,18 +91,21 @@ export default function PriceChart({
     <div className={cn("w-full", className)}>
       {showRanges && (
         <div className="mb-3 flex items-center justify-between gap-2">
-          <p className="text-sm text-muted-foreground">
-            {data.length > 1 ? (
-              <>
-                <span className={cn("font-medium", currentPrice < first ? "text-success" : currentPrice > first ? "text-danger" : "text-foreground")}>
-                  {formatPercent(percentChange(first, currentPrice), { signed: true })}
-                </span>{" "}
-                in this range
-              </>
-            ) : (
-              "Not enough history yet"
-            )}
-          </p>
+          <div className="min-w-0">
+            {title && <h2 className="font-semibold max-md:text-[0.9375rem]">{title}</h2>}
+            <p className={cn("text-muted-foreground", title ? "mt-px text-[0.8125rem] md:text-sm" : "text-sm")}>
+              {data.length > 1 ? (
+                <>
+                  <span className={cn("font-medium", currentPrice < first ? "text-success" : currentPrice > first ? "text-danger" : "text-foreground")}>
+                    {formatPercent(percentChange(first, currentPrice), { signed: true })}
+                  </span>{" "}
+                  in this range
+                </>
+              ) : (
+                "Not enough history yet"
+              )}
+            </p>
+          </div>
           <Tabs value={range} onValueChange={(v) => setRange(v as RangeValue)}>
             <TabsList className="h-8 pointer-coarse:h-10">
               {RANGES.map((r) => (
@@ -109,7 +118,10 @@ export default function PriceChart({
         </div>
       )}
 
-      <div style={{ height }} className="-ml-2">
+      <div
+        style={{ "--chart-h": `${height}px`, "--chart-h-compact": `${compactHeight ?? height}px` } as React.CSSProperties}
+        className="-ml-2 h-(--chart-h) max-md:h-(--chart-h-compact)"
+      >
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
             <defs>
@@ -160,20 +172,29 @@ export default function PriceChart({
                 );
               }}
             />
-            {typeof lowestPrice === "number" && (
+            {/* With a target the low would crowd its label, and the target is what matters here. */}
+            {typeof lowestPrice === "number" && typeof targetPrice !== "number" && (
               <ReferenceLine
                 y={lowestPrice}
-                stroke="var(--color-success)"
-                strokeDasharray="4 4"
-                label={{ value: "Low", position: "insideBottomLeft", fontSize: 10, fill: "var(--color-success)" }}
+                stroke="var(--color-muted-foreground)"
+                strokeDasharray="3 3"
+                strokeOpacity={0.6}
+                label={{ value: "Low", position: "insideBottomLeft", fontSize: 10, fill: "var(--color-muted-foreground)" }}
               />
             )}
             {typeof targetPrice === "number" && (
               <ReferenceLine
                 y={targetPrice}
-                stroke="var(--color-chart-2)"
+                stroke="var(--color-success)"
+                strokeWidth={1.25}
                 strokeDasharray="4 4"
-                label={{ value: "Target", position: "insideTopLeft", fontSize: 10, fill: "var(--color-chart-2)" }}
+                label={{
+                  value: `Your target ${formatPrice(targetPrice, currency)}`,
+                  position: "insideTopLeft",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  fill: "var(--color-success)",
+                }}
               />
             )}
             <Area

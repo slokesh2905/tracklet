@@ -29,6 +29,9 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
+/** The slot in the phone's product-page capsule that the page fills with Share and ⋯ (ProductNavActions). */
+export const PRODUCT_NAV_SLOT = "product-nav-actions";
+
 /** The phone's tab bar: Settings lives under the avatar there. The order puts Track in the middle. */
 const TABS = [NAV[0], NAV[1], NAV[3], NAV[2]] as const;
 
@@ -72,6 +75,8 @@ export function AppHeader({ email, unreadAlerts }: { email: string; unreadAlerts
         >
           <ChevronLeft className="size-6" /> Products
         </Link>
+        {/* Share and ⋯ for the product, portalled in by the page (ProductNavActions). */}
+        <div id={PRODUCT_NAV_SLOT} className="ml-auto flex items-center" />
       </GlassNav>
     )}
     <GlassNav className="gap-4 sm:h-16" headerClassName={cn(onProduct && "max-md:hidden")}>

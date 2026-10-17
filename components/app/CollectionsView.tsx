@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { FolderHeart, FolderPlus, Globe, ImageOff, Loader2, Lock, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, FolderHeart, FolderPlus, Globe, ImageOff, Loader2, Lock, MoreVertical, Pencil, Plus, Trash2, Trophy } from "lucide-react";
 import { toast } from "sonner";
 import {
   createCollection,
@@ -35,6 +35,22 @@ import { deleteWithUndo } from "@/lib/undo";
 type Collection = CollectionRow & {
   products: Array<Pick<ProductRow, "id" | "name" | "image_url" | "current_price" | "currency">>;
 };
+
+/** Products in no collection, which get a tile of their own on a phone. */
+type Unsorted = { count: number; images: Array<string | null> };
+
+function Cover({ src, small = false }: { src: string | null; small?: boolean }) {
+  return (
+    <span className={`flex items-center justify-center bg-card ${small ? "p-[0.4375rem]" : "p-2.5"}`}>
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="" loading="lazy" className={`size-full object-contain ${small ? "rounded-md" : "rounded-lg"}`} />
+      ) : (
+        <ImageOff className="size-4 text-muted-foreground" />
+      )}
+    </span>
+  );
+}
 
 function NameDialog({
   open,
@@ -184,7 +200,7 @@ function CollectionCard({
 }
 
 /** A phone shows each collection as a tile; tapping it opens the full card (products, sharing) in a sheet. */
-function CollectionTile({ collection }: { collection: Collection }) {
+function CollectionTile({ collection, lows }: { collection: Collection; lows: number }) {
   const [open, setOpen] = useState(false);
   const [removed, setRemoved] = useState(false);
   const count = collection.products.length;
@@ -213,14 +229,9 @@ function CollectionTile({ collection }: { collection: Collection }) {
               <FolderHeart className="size-7 text-muted-foreground" />
             </span>
           ) : (
-            covers.map((p) => (
-              <span key={p.id} className="flex items-center justify-center bg-card p-2.5">
-                {p.image_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.image_url} alt="" loading="lazy" className="size-full rounded-lg object-contain" />
-                ) : (
-                  <ImageOff className="size-4 text-muted-foreground" />
-                )}
+            covers.map((p, i) => (
+              <span key={p.id} className={covers.length === 1 && i === 0 ? "col-span-2 grid" : "grid"}>
+                <Cover src={p.image_url} />
               </span>
             ))
           )}
@@ -231,7 +242,7 @@ function CollectionTile({ collection }: { collection: Collection }) {
             {count} product{count === 1 ? "" : "s"}
             {total && ` · ${total}`}
           </span>
-          <span className="mt-2 flex">
+          <span className="mt-2 flex flex-wrap gap-1.5">
             {collection.is_public ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-chart-2/15 px-2 py-0.5 text-xs font-medium text-chart-2">
                 <Globe className="size-[0.6875rem]" /> Shared
@@ -239,6 +250,11 @@ function CollectionTile({ collection }: { collection: Collection }) {
             ) : (
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                 <Lock className="size-[0.6875rem]" /> Private
+              </span>
+            )}
+            {lows > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/12 px-2 py-0.5 text-xs font-medium text-primary">
+                <Trophy className="size-[0.6875rem]" /> {lows} low{lows === 1 ? "" : "s"}
               </span>
             )}
           </span>
@@ -263,20 +279,71 @@ function CollectionTile({ collection }: { collection: Collection }) {
   );
 }
 
-export default function CollectionsView({ collections }: { collections: Collection[] }) {
+function NewButton({ className, onClick }: { className?: string; onClick: () => void }) {
+  return (
+    <Button
+      onClick={onClick}
+      className={`gap-2 max-md:h-10 max-md:gap-1.5 max-md:rounded-full max-md:bg-primary/12 max-md:pr-3.5 max-md:pl-3 max-md:font-semibold max-md:text-primary max-md:shadow-none max-md:hover:bg-primary/20 ${className ?? ""}`}
+    >
+      <Plus className="size-4 max-md:size-[1.0625rem]" /> <span className="md:hidden">New</span>
+      <span className="max-md:hidden">New collection</span>
+    </Button>
+  );
+}
+
+/** Everything not in a collection, one tap from Products filtered to it. */
+function UnsortedTile({ unsorted }: { unsorted: Unsorted }) {
+  const [first, ...rest] = unsorted.images;
+  return (
+    <Link href="/dashboard?collection=none" className="flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-card text-left shadow-xs">
+      <span
+        className={`grid h-28 w-full gap-px bg-border ${unsorted.images.length > 1 ? "grid-cols-2" : "grid-cols-1"} ${unsorted.images.length > 2 ? "grid-rows-2" : ""}`}
+      >
+        <span className={`grid ${unsorted.images.length > 2 ? "row-span-2" : ""}`}>
+          <Cover src={first ?? null} />
+        </span>
+        {rest.map((src, i) => (
+          <span key={i} className="grid">
+            <Cover src={src} small={unsorted.images.length > 2} />
+          </span>
+        ))}
+      </span>
+      <span className="flex flex-col gap-0.5 px-3 pt-2.5 pb-3">
+        <span className="truncate text-[0.9375rem] font-semibold">Not in a collection</span>
+        <span className="text-xs text-muted-foreground">
+          {unsorted.count} product{unsorted.count === 1 ? "" : "s"}
+        </span>
+        <span className="mt-2 flex items-center gap-0.5 text-xs font-medium text-primary">
+          Sort them <ChevronRight className="size-[0.8125rem]" />
+        </span>
+      </span>
+    </Link>
+  );
+}
+
+export default function CollectionsView({
+  collections,
+  lows = {},
+  unsorted,
+}: {
+  collections: Collection[];
+  /** All-time lows per collection id. */
+  lows?: Record<string, number>;
+  unsorted?: Unsorted;
+}) {
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-[1.75rem] leading-tight font-bold tracking-tight md:text-2xl">Collections</h1>
-          <p className="text-sm text-muted-foreground">Group products into wishlists and share them.</p>
+      <div className="flex items-end justify-between gap-4 max-md:block">
+        <div className="max-md:contents">
+          <div className="flex items-center justify-between gap-3 max-md:pt-1.5">
+            <h1 className="text-[1.75rem] leading-tight font-bold tracking-tight md:text-2xl">Collections</h1>
+            <NewButton className="md:hidden" onClick={() => setCreateOpen(true)} />
+          </div>
+          <p className="text-sm text-muted-foreground max-md:mt-0.5">Group products into wishlists and share them.</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="gap-2 max-md:h-10 max-md:rounded-full max-md:bg-primary/12 max-md:text-primary max-md:hover:bg-primary/20">
-          <Plus className="size-4" /> <span className="md:hidden">New</span>
-          <span className="max-md:hidden">New collection</span>
-        </Button>
+        <NewButton className="max-md:hidden" onClick={() => setCreateOpen(true)} />
       </div>
 
       {collections.length === 0 ? (
@@ -292,14 +359,15 @@ export default function CollectionsView({ collections }: { collections: Collecti
         </section>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 md:hidden">
+          <div className="grid grid-cols-2 gap-3 max-md:-mt-1.5 md:hidden">
             {collections.map((c) => (
-              <CollectionTile key={c.id} collection={c} />
+              <CollectionTile key={c.id} collection={c} lows={lows[c.id] ?? 0} />
             ))}
+            {unsorted && unsorted.count > 0 && <UnsortedTile unsorted={unsorted} />}
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
-              className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed text-muted-foreground"
+              className="flex min-h-[12.25rem] flex-col items-center justify-center gap-2 rounded-[1.125rem] border-[1.5px] border-dashed border-foreground/15 text-muted-foreground"
             >
               <span className="flex size-11 items-center justify-center rounded-full border bg-card">
                 <FolderPlus className="size-5 text-primary" />

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, ChevronRight, ImageOff, PackageX, Store } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronRight, ImageOff, PackageX, Store, Target } from "lucide-react";
 import AiVerdictCard from "@/components/product/AiVerdictCard";
 import AlertKindIcon from "@/components/product/AlertKindIcon";
 import OtherStores from "@/components/product/OtherStores";
@@ -11,11 +11,13 @@ import DiscountCheckPanel from "@/components/product/DiscountCheckPanel";
 import InsightsPanel from "@/components/product/InsightsPanel";
 import PriceChart from "@/components/product/PriceChart";
 import ProductActions from "@/components/product/ProductActions";
-import ProductBar, { AlertRow } from "@/components/product/ProductBar";
+import ProductBar from "@/components/product/ProductBar";
+import ProductNavActions from "@/components/product/ProductNavActions";
+import ProductSettingsList from "@/components/product/ProductSettingsList";
 import ProductShare from "@/components/product/ProductShare";
 import { ALERT_COPY } from "@/lib/alerts";
 import { isAiEnabled } from "@/lib/ai";
-import { getProductDetail } from "@/lib/data";
+import { getCollectionList, getProductDetail } from "@/lib/data";
 import { formatDate, formatPercent, formatPrice, hostname, percentChange, timeAgo } from "@/lib/format";
 import { retailerName } from "@/lib/retailers";
 import { uuidSchema } from "@/lib/validation";
@@ -29,11 +31,21 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return { title: detail?.product.name.slice(0, 60) ?? "Product" };
 }
 
-function Section({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
+function Section({
+  title,
+  children,
+  className,
+  titleClassName,
+}: {
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+  titleClassName?: string;
+}) {
   const id = `section-${title.toLowerCase().replace(/\W+/g, "-")}`;
   return (
-    <section aria-labelledby={id} className={`scroll-mt-24 rounded-xl border bg-card p-4 ${className ?? ""}`}>
-      <h2 id={id} className="mb-3 font-semibold">{title}</h2>
+    <section aria-labelledby={id} className={`scroll-mt-24 rounded-xl border bg-card p-4 max-md:p-3.5 ${className ?? ""}`}>
+      <h2 id={id} className={`mb-3 font-semibold ${titleClassName ?? ""}`}>{title}</h2>
       {children}
     </section>
   );
@@ -42,7 +54,7 @@ function Section({ title, children, className }: { title: string; children: Reac
 export default async function ProductPage({ params }: Params) {
   const { id } = await params;
   if (!uuidSchema.safeParse(id).success) notFound();
-  const detail = await getProductDetail(id);
+  const [detail, collections] = await Promise.all([getProductDetail(id), getCollectionList()]);
   if (!detail) notFound();
 
   const { product, history, insights, evidence, gate, offers, comparedAt, verdict, staleVerdict, alerts } = detail;
@@ -139,14 +151,14 @@ export default async function ProductPage({ params }: Params) {
             <DiscountCheckBadge check={evidence.discountCheck} />
             {targetPrice !== null && product.current_price <= targetPrice && (
               <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground md:hidden">
-                Under your {formatPrice(targetPrice, product.currency)}
+                <Target className="size-3" /> Under your {formatPrice(targetPrice, product.currency)}
               </span>
             )}
           </div>
           <p className="mt-2.5 text-xs text-muted-foreground md:mt-2" suppressHydrationWarning>
-            Price data since {formatDate(evidence.firstSeen)}
+            Price data since {formatDate(evidence.firstSeen, { year: false })}
             {evidence.shoppers > 1 && ` from ${evidence.shoppers} shoppers`}
-            {product.last_checked_at && ` · last checked ${timeAgo(product.last_checked_at)}`}
+            {product.last_checked_at && ` · checked ${timeAgo(product.last_checked_at)}`}
           </p>
           <div className="mt-4 max-md:hidden">
             <ProductActions productId={product.id} url={product.url} paused={product.paused} />
@@ -177,15 +189,17 @@ export default async function ProductPage({ params }: Params) {
 
       <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-4 max-lg:contents">
-          <Section title="Price history" className="max-lg:order-1">
+          <section aria-label="Price history" className="rounded-xl border bg-card p-4 max-md:p-3.5 max-lg:order-1">
             <PriceChart
+              title="Price history"
+              compactHeight={180}
               history={history}
               currentPrice={product.current_price}
               currency={product.currency}
               targetPrice={targetPrice}
               lowestPrice={insights.dataPoints > 1 ? insights.allTime.low : null}
             />
-          </Section>
+          </section>
           {evidence.discountCheck.status !== "none" && (
             <Section title="Is this discount real?" className="max-lg:order-2">
               <DiscountCheckPanel
@@ -197,7 +211,8 @@ export default async function ProductPage({ params }: Params) {
               />
             </Section>
           )}
-          <Section title="Insights" className="max-lg:order-3">
+          {/* On a phone the panel's own "Deal score" heading leads, as in the design. */}
+          <Section title="Insights" className="max-lg:order-3" titleClassName="max-md:sr-only">
             <InsightsPanel insights={insights} currency={product.currency} currentPrice={product.current_price} />
           </Section>
         </div>
@@ -223,8 +238,8 @@ export default async function ProductPage({ params }: Params) {
               />
             </div>
           )}
-          <Section title="Other stores" className="max-lg:order-4">
-            <OtherStores productId={product.id} offers={offers} currentPrice={product.current_price} comparedAt={comparedAt} />
+          <Section title="Other stores" className="max-lg:order-4" titleClassName="max-md:sr-only">
+            <OtherStores productId={product.id} offers={offers} currentPrice={product.current_price} currency={product.currency} comparedAt={comparedAt} />
           </Section>
           {/* Desktop edits the alert inline; a phone gets a row that opens the sheet from the pinned bar. */}
           <Section title="Price alert" className="max-lg:order-5 max-md:hidden">
@@ -237,14 +252,24 @@ export default async function ProductPage({ params }: Params) {
               range={range}
             />
           </Section>
-          <div className="rounded-xl border bg-card max-lg:order-5 md:hidden">
-            <AlertRow currency={product.currency} targetPrice={targetPrice} alertPct={alertPct} />
+          <div className="max-lg:order-5 md:hidden">
+            <ProductSettingsList
+              productId={product.id}
+              name={product.name}
+              currency={product.currency}
+              targetPrice={targetPrice}
+              alertPct={alertPct}
+              slug={product.share_slug}
+              isPublic={product.is_public}
+              collectionId={product.collection_id}
+              collections={collections}
+            />
           </div>
-          <Section title="Share" className="max-lg:order-6">
+          <Section title="Share" className="max-lg:order-6 max-md:hidden">
             <ProductShare productId={product.id} slug={product.share_slug} isPublic={product.is_public} name={product.name} />
           </Section>
           {alerts.length > 0 && (
-            <Section title="Recent alerts" className="max-lg:order-7">
+            <Section title="Recent alerts" className="max-lg:order-7 max-md:hidden">
               <ul className="flex flex-col divide-y text-sm">
                 {alerts.map((a) => (
                   <li key={a.id} className="flex items-center justify-between gap-3 py-2">
@@ -264,15 +289,26 @@ export default async function ProductPage({ params }: Params) {
       </div>
 
       <ProductActions productId={product.id} url={product.url} paused={product.paused} footer />
-      <ProductBar
+      <ProductNavActions
         productId={product.id}
         name={product.name}
         url={product.url}
+        slug={product.share_slug}
+        isPublic={product.is_public}
+        paused={product.paused}
+      />
+      <ProductBar
+        productId={product.id}
+        name={product.name}
+        imageUrl={product.image_url}
+        url={product.url}
         currency={product.currency}
         currentPrice={product.current_price}
+        isAllTimeLow={insights.isAllTimeLow}
         targetPrice={targetPrice}
         alertPct={alertPct}
         range={range}
+        suggestion={cheaper ? { label: `${retailerName(cheaper.retailer)} price`, price: cheaper.price } : null}
       />
     </div>
   );

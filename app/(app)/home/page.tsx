@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, BellRing, ChevronRight, ImageOff, PiggyBank, Target } from "lucide-react";
+import ClipboardSuggest from "@/components/app/ClipboardSuggest";
 import HomeGreeting from "@/components/app/HomeGreeting";
 import HomeHero from "@/components/app/HomeHero";
 import { getAlerts, getDashboardData } from "@/lib/data";
@@ -25,12 +26,14 @@ export default async function HomePage() {
       ? "Track your first product to see what to act on here."
       : `Your ${products.length} product${products.length === 1 ? " was" : "s were"} checked ${lastChecked ? timeAgo(lastChecked) : "recently"}.`;
 
+  // Spacing follows the design screen by screen rather than one uniform gap.
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-xl flex-col">
       <HomeGreeting name={name} summary={summary} />
+      <ClipboardSuggest trackedUrls={products.map((p) => p.url)} />
 
       {products.length === 0 ? (
-        <section className="flex flex-col items-center rounded-2xl border border-dashed px-6 py-12 text-center">
+        <section className="mt-6 flex flex-col items-center rounded-xl border border-dashed px-6 py-12 text-center">
           <Target className="size-10 text-muted-foreground" />
           <h2 className="mt-3 font-semibold">Nothing tracked yet</h2>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
@@ -43,7 +46,7 @@ export default async function HomePage() {
           {cards.length > 0 ? (
             <HomeHero cards={cards} />
           ) : (
-            <section className="flex items-start gap-3 rounded-2xl border bg-card p-4">
+            <section className="mt-[1.375rem] flex items-start gap-3 rounded-xl border bg-card p-4 shadow-xs">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.625rem] bg-primary/12 text-primary">
                 <BellRing className="size-[1.125rem]" />
               </span>
@@ -57,7 +60,7 @@ export default async function HomePage() {
           )}
 
           {stats.totalSavings > 0 && (
-            <div className="flex items-center gap-2.5 rounded-2xl bg-success/8 px-3.5 py-3">
+            <div className={`${cards.length > 1 ? "mt-1.5" : "mt-3"} flex items-center gap-2.5 rounded-xl bg-success/8 px-3.5 py-3`}>
               <PiggyBank className="size-[1.125rem] shrink-0 text-success" />
               <p className="text-sm">
                 <b className="font-semibold text-success">{formatPrice(stats.totalSavings, stats.currency)}</b> saved from price drops so far
@@ -66,9 +69,9 @@ export default async function HomePage() {
           )}
 
           {(targets.length > 0 || untargeted > 0) && (
-            <section aria-label="Close to your target">
+            <section aria-label="Close to your target" className="mt-6">
               <h2 className="text-xl font-semibold tracking-tight">Close to your target</h2>
-              <div className="mt-2.5 overflow-hidden rounded-2xl border bg-card shadow-xs">
+              <div className="mt-2.5 overflow-hidden rounded-xl border bg-card shadow-xs">
                 <ul className="divide-y px-3.5">
                   {targets.map((t) => (
                     <li key={t.productId}>
@@ -103,7 +106,7 @@ export default async function HomePage() {
                 {untargeted > 0 && (
                   <Link
                     href="/dashboard"
-                    className="flex h-12 items-center gap-2 border-t px-3.5 text-sm font-medium text-primary"
+                    className={`flex h-12 items-center gap-2 px-3.5 text-sm font-medium text-primary ${targets.length > 0 ? "border-t" : ""}`}
                   >
                     <Target className="size-4" />
                     <span className="flex-1">
@@ -116,7 +119,7 @@ export default async function HomePage() {
             </section>
           )}
 
-          <Link href="/dashboard" className="flex h-11 items-center justify-center gap-1.5 text-sm font-medium text-muted-foreground">
+          <Link href="/dashboard" className="mt-3.5 flex h-11 items-center justify-center gap-1.5 text-sm font-medium text-muted-foreground">
             See all {products.length} product{products.length === 1 ? "" : "s"} <ArrowRight className="size-[0.9375rem]" />
           </Link>
         </>

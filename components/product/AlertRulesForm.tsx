@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateAlertRules } from "@/app/actions/products";
 import AlertRuleFields, { useAlertRule } from "@/components/product/AlertRuleFields";
-import type { PriceRange } from "@/components/product/AlertStepper";
+import type { PriceRange, PriceSuggestion } from "@/components/product/AlertStepper";
 import { Button } from "@/components/ui/button";
 
 type Props = {
@@ -16,6 +16,7 @@ type Props = {
   alertPct: number | null;
   /** Price history range, used to draw the phone's price scale. */
   range?: PriceRange | null;
+  suggestion?: PriceSuggestion | null;
   onSaved?: () => void;
 };
 
@@ -26,6 +27,7 @@ export default function AlertRulesForm({
   targetPrice,
   alertPct,
   range,
+  suggestion,
   onSaved,
 }: Props) {
   const rule = useAlertRule({ currentPrice, targetPrice, alertPct });
@@ -46,7 +48,7 @@ export default function AlertRulesForm({
 
   return (
     <form onSubmit={save} className="flex flex-col gap-5">
-      <AlertRuleFields idPrefix={productId} currency={currency} currentPrice={currentPrice} range={range} rule={rule} />
+      <AlertRuleFields idPrefix={productId} currency={currency} currentPrice={currentPrice} range={range} suggestion={suggestion} rule={rule} />
 
       <div className="flex gap-2.5 sm:justify-end">
         {rule.hasRule && (

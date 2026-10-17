@@ -100,12 +100,14 @@ export default function PressFeedback() {
 
     const onUp = (e: PointerEvent) => {
       if (!press || e.pointerId !== press.pointerId) return;
-      const { el, inside, dragged } = press;
+      const { el, inside, dragged, x, y } = press;
       end();
       // The press shrinks the target, so a release in its outer few pixels can land just outside
-      // and lose the click. If the user never left the target, deliver it.
+      // and lose the click. If the user never left the target, deliver it. A mouse that travelled
+      // was dragging something (a swipe row moves with it), not tapping.
       const missed = e.target instanceof Node && !el.contains(e.target) && !resolve(e.target);
-      if (e.type === "pointerup" && inside && !dragged && missed && el.isConnected) el.click();
+      const still = Math.hypot(e.clientX - x, e.clientY - y) <= SLOP;
+      if (e.type === "pointerup" && inside && !dragged && still && missed && el.isConnected) el.click();
     };
 
     const onKeyDown = (e: KeyboardEvent) => {

@@ -24,6 +24,8 @@ type Props = {
   onAddingChange?: (adding: boolean) => void;
   /** Called once at least one product was added, so a hosting sheet can close. */
   onAdded?: () => void;
+  /** Start with the copied link in the box, when the browser allows reading it without asking. */
+  fromClipboard?: boolean;
   size?: "hero" | "default";
 };
 
@@ -41,7 +43,7 @@ function checkLines(text: string) {
     });
 }
 
-export default function AddProductForm({ signedIn, collections = [], collectionId, onAddingChange, onAdded, size = "default" }: Props) {
+export default function AddProductForm({ signedIn, collections = [], collectionId, onAddingChange, onAdded, fromClipboard = false, size = "default" }: Props) {
   const [mode, setMode] = useState<"single" | "bulk">("single");
   const [url, setUrl] = useState("");
   const [bulkText, setBulkText] = useState("");
@@ -123,7 +125,7 @@ export default function AddProductForm({ signedIn, collections = [], collectionI
 
       {mode === "single" ? (
         signedIn ? (
-          <AddFlow collections={collections} onAdded={() => onAdded?.()} onAddingChange={onAddingChange} />
+          <AddFlow collections={collections} fromClipboard={fromClipboard} onAdded={() => onAdded?.()} onAddingChange={onAddingChange} />
         ) : (
           // Signed out there is nothing to preview: asking to sign in is the whole flow.
           <form

@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BellRing, ChevronRight, ExternalLink } from "lucide-react";
-import AlertRulesForm from "@/components/product/AlertRulesForm";
-import type { PriceRange } from "@/components/product/AlertStepper";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { BellRing, ExternalLink } from "lucide-react";
+import AlertSheet from "@/components/product/AlertSheet";
+import type { PriceRange, PriceSuggestion } from "@/components/product/AlertStepper";
 import { formatPrice, hostname } from "@/lib/format";
 
 const OPEN_ALERT = "tracklet:open-alert";
@@ -12,19 +11,22 @@ const OPEN_ALERT = "tracklet:open-alert";
 type Props = {
   productId: string;
   name: string;
+  imageUrl: string | null;
   url: string;
   currency: string;
   currentPrice: number;
+  isAllTimeLow: boolean;
   targetPrice: number | null;
   alertPct: number | null;
   range: PriceRange | null;
+  suggestion: PriceSuggestion | null;
 };
 
 /**
  * Phone-only: the store button and the alert sit in a floating glass capsule, in the spot the
  * tab bar occupies elsewhere. It also owns the alert sheet, which the "Alert" row below can open.
  */
-export default function ProductBar({ productId, name, url, currency, currentPrice, targetPrice, alertPct, range }: Props) {
+export default function ProductBar({ url, targetPrice, alertPct, ...sheet }: Props) {
   const [open, setOpen] = useState(false);
   const hasRule = targetPrice !== null || alertPct !== null;
 
@@ -56,27 +58,7 @@ export default function ProductBar({ productId, name, url, currency, currentPric
         </a>
       </div>
 
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto rounded-t-2xl pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
-          <SheetHeader>
-            <SheetTitle className="text-xl tracking-tight">Price alert</SheetTitle>
-            <SheetDescription className="truncate">
-              {name} · now {formatPrice(currentPrice, currency)}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="px-4">
-            <AlertRulesForm
-              productId={productId}
-              currency={currency}
-              currentPrice={currentPrice}
-              targetPrice={targetPrice}
-              alertPct={alertPct}
-              range={range}
-              onSaved={() => setOpen(false)}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
+      <AlertSheet open={open} onOpenChange={setOpen} targetPrice={targetPrice} alertPct={alertPct} {...sheet} />
     </>
   );
 }
@@ -102,9 +84,7 @@ export function AlertRow({ currency, targetPrice, alertPct }: { currency: string
         <span className="block text-[0.9375rem] font-medium">{title}</span>
         <span className="block text-xs text-muted-foreground">Plus new lows and restocks</span>
       </span>
-      <span className="flex items-center text-sm font-medium text-primary">
-        Edit <ChevronRight className="size-4" />
-      </span>
+      <span className="text-sm font-medium text-primary">Edit</span>
     </button>
   );
 }

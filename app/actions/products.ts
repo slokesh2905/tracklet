@@ -29,6 +29,7 @@ const FRESH_MS = 6 * 60 * 60 * 1000;
 const MANUAL_CHECK_MIN_MS = 60 * 60 * 1000;
 
 function revalidateApp() {
+  revalidatePath("/home");
   revalidatePath("/dashboard");
   revalidatePath("/collections");
 }
@@ -341,6 +342,7 @@ export async function moveToCollection(productId: string, collectionId: string |
   if (updated.length === 0) return fail("Couldn't move that product");
 
   revalidateApp();
+  revalidatePath(`/products/${productId}`);
   return { ok: true, message: collectionId ? "Added to collection" : "Removed from collection" };
 }
 
@@ -452,6 +454,7 @@ export async function generateVerdict(productId: string): Promise<ActionResult> 
   }
 
   revalidatePath(`/products/${productId}`);
+  revalidatePath("/home");
   revalidatePath("/dashboard");
   return { ok: true };
 }

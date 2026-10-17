@@ -17,20 +17,22 @@ const TAGS: Record<HeroKind, { label: string; icon: LucideIcon; className: strin
 const W = 280;
 const H = 56;
 
-/** Price history as a line and soft area, with the target as a dashed line when there is one. */
+/** Price history as steps (a price holds until it changes), with the target as a dashed line when there is one. */
 function Spark({ values, target, currency }: { values: number[]; target: number | null; currency: string }) {
   const pts = values.length > 1 ? values : [values[0] ?? 0, values[0] ?? 0];
   const all = target === null ? pts : [...pts, target];
   const lo = Math.min(...all);
   const span = Math.max(...all) - lo || 1;
-  const y = (v: number) => 6 + (1 - (v - lo) / span) * 44;
-  const x = (i: number) => (i / (pts.length - 1)) * W;
-  const line = pts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
-  const last = pts.length - 1;
+  const y = (v: number) => 4 + (1 - (v - lo) / span) * (H - 8);
+  // Each change is a step; the last price runs on to the right edge, where today's dot sits.
+  const x = (i: number) => (i / (pts.length - 1)) * (W - 6);
+  let line = `M0,${y(pts[0]!).toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) line += ` H${x(i).toFixed(1)} V${y(pts[i]!).toFixed(1)}`;
+  line += ` H${W}`;
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="block w-full overflow-visible" role="img" aria-label="Price history">
-      <path d={`${line} V${H} H0 Z`} className="fill-primary/10" />
+      <path d={`${line} V${H} H0 Z`} className="fill-primary/8" />
       {target !== null && (
         <>
           <line x1="0" x2={W} y1={y(target)} y2={y(target)} strokeWidth="1.25" strokeDasharray="4 4" className="stroke-success" />
@@ -40,7 +42,7 @@ function Spark({ values, target, currency }: { values: number[]; target: number 
         </>
       )}
       <path d={line} fill="none" strokeWidth="2" strokeLinejoin="round" className="stroke-primary" />
-      <circle cx={x(last)} cy={y(pts[last]!)} r="4" strokeWidth="2" className="fill-primary stroke-card" />
+      <circle cx={W} cy={y(pts.at(-1)!)} r="4" strokeWidth="2" className="fill-primary stroke-card" />
     </svg>
   );
 }
@@ -52,7 +54,7 @@ function Card({ card }: { card: HeroCard }) {
   const host = hostname(card.url);
 
   return (
-    <div className="flex w-[19.375rem] shrink-0 snap-start flex-col gap-3 rounded-2xl border bg-card p-3.5 shadow-xs">
+    <div className="flex w-[19.375rem] shrink-0 snap-start flex-col gap-3 rounded-xl border bg-card p-3.5 shadow-xs">
       <div className="flex items-center justify-between">
         <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap", tag.className)}>
           <Icon className="size-3" /> {tag.label}
@@ -122,7 +124,7 @@ export default function HomeHero({ cards }: { cards: HeroCard[] }) {
   const STRIDE = 320;
 
   return (
-    <section aria-label="Worth a look">
+    <section aria-label="Worth a look" className="mt-[1.375rem]">
       <div className="flex items-baseline justify-between">
         <h2 className="text-xl font-semibold tracking-tight">Worth a look</h2>
         <span className="text-[0.8125rem] text-muted-foreground tabular-nums">
@@ -141,7 +143,7 @@ export default function HomeHero({ cards }: { cards: HeroCard[] }) {
       </div>
 
       {cards.length > 1 && (
-        <div className="flex justify-center">
+        <div className="-mt-0.5 flex justify-center">
           {cards.map((card, i) => (
             <button
               key={card.productId}

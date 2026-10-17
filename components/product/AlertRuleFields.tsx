@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import AlertStepper, { type AlertMode, type PriceRange } from "@/components/product/AlertStepper";
+import AlertStepper, { type AlertMode, type PriceRange, type PriceSuggestion } from "@/components/product/AlertStepper";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatPrice } from "@/lib/format";
@@ -56,11 +56,13 @@ type Props = {
   currentPrice: number;
   /** Price history range, used to draw the phone's price scale. */
   range?: PriceRange | null;
+  /** An extra one-tap target on the phone, e.g. a cheaper store's price. */
+  suggestion?: PriceSuggestion | null;
   rule: AlertRule;
 };
 
 /** The phone's stepper and the desktop's number inputs, both editing the same rule. */
-export default function AlertRuleFields({ idPrefix, currency, currentPrice, range, rule }: Props) {
+export default function AlertRuleFields({ idPrefix, currency, currentPrice, range, suggestion, rule }: Props) {
   const { target, pct, mode, setTarget, setPct, changeMode } = rule;
   const suggestions = [5, 10, 20].map((off) => Math.floor(currentPrice * (1 - off / 100)));
   const stepperValue = mode === "price" ? (target ? Number(target) : null) : pct ? Number(pct) : null;
@@ -71,6 +73,7 @@ export default function AlertRuleFields({ idPrefix, currency, currentPrice, rang
         currency={currency}
         currentPrice={currentPrice}
         range={range}
+        suggestion={suggestion}
         mode={mode}
         onModeChange={changeMode}
         value={stepperValue}

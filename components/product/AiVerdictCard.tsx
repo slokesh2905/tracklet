@@ -89,11 +89,19 @@ export default function AiVerdictCard({ productId, verdict, stale, aiEnabled, ga
         <h2 className="flex items-center gap-2 font-semibold">
           <Sparkles className="size-4 text-primary" /> Should I buy now?
         </h2>
-        {shown && aiEnabled && (
-          <Button variant="ghost" size="sm" onClick={run} disabled={pending} className="gap-1.5">
-            {pending ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-            Refresh
-          </Button>
+        {shown && (
+          <span className="flex items-center gap-1">
+            {/* A phone shows when it was written up here; the desktop has it beside the confidence. */}
+            <span className="text-xs text-muted-foreground md:hidden" suppressHydrationWarning>
+              {timeAgo(shown.generated_at)}
+            </span>
+            {aiEnabled && (
+              <Button variant="ghost" size="sm" onClick={run} disabled={pending} className="gap-1.5 max-md:-my-2 max-md:-mr-2 max-md:size-9 max-md:px-0" aria-label="Refresh verdict">
+                {pending ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                <span className="max-md:hidden">Refresh</span>
+              </Button>
+            )}
+          </span>
         )}
       </div>
 
@@ -104,11 +112,14 @@ export default function AiVerdictCard({ productId, verdict, stale, aiEnabled, ga
               {VERDICT_COPY[shown.verdict].label}
             </span>
             <span className="text-xs text-muted-foreground">
-              {Math.round(Number(shown.confidence) * 100)}% confidence ·{" "}
-              <span suppressHydrationWarning>{timeAgo(shown.generated_at)}</span>
+              {Math.round(Number(shown.confidence) * 100)}% confidence
+              <span className="max-md:hidden" suppressHydrationWarning>
+                {" "}
+                · {timeAgo(shown.generated_at)}
+              </span>
             </span>
           </div>
-          <p className="mt-3 text-sm">{shown.summary}</p>
+          <p className="mt-2.5 text-sm leading-normal text-pretty">{shown.summary}</p>
           {reasons.length > 0 && (
             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
               {reasons.map((r) => (

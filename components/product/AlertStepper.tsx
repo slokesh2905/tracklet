@@ -2,12 +2,15 @@
 
 import { useRef } from "react";
 import { Info, Minus, Plus } from "lucide-react";
-import { formatPrice } from "@/lib/format";
+import { formatCompactPrice, formatPrice } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export type AlertMode = "price" | "pct";
 
 export type PriceRange = { low: number; high: number; average: number };
+
+/** A price worth offering as a one-tap target, like a cheaper store's. */
+export type PriceSuggestion = { label: string; price: number };
 
 type Props = {
   currency: string;
@@ -18,6 +21,8 @@ type Props = {
   /** Target price when mode is "price", drop percent when mode is "pct". */
   value: number | null;
   onChange: (value: number) => void;
+  /** An extra target chip, e.g. "Croma price · ₹22,490". */
+  suggestion?: PriceSuggestion | null;
 };
 
 /** A step that's a round number for the price: ₹500 on a ₹23k item, ₹1 on a $9 one. */
@@ -36,14 +41,15 @@ const chip = "h-10 shrink-0 rounded-full border px-3.5 text-[0.8125rem] font-med
  * Phone version of the alert rule: −/+ buttons and a draggable price scale instead of the keypad.
  * Controlled by AlertRulesForm, which owns the values and the save.
  */
-export default function AlertStepper({ currency, currentPrice, range, mode, onModeChange, value, onChange }: Props) {
+export default function AlertStepper({ currency, currentPrice, range, mode, onModeChange, value, onChange, suggestion }: Props) {
   const rulerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
   const step = stepFor(currentPrice);
   const isPrice = mode === "price";
   const lo = Math.max(step, Math.floor(Math.min(range?.low ?? currentPrice, currentPrice) * 0.8));
-  const hi = Math.ceil(Math.max(range?.high ?? currentPrice, currentPrice) * 1.05);
+  // With history the scale ends at the highest price seen, so its right end reads "High".
+  const hi = range ? Math.ceil(Math.max(range.high, currentPrice)) : Math.ceil(currentPrice * 1.1);
 
   const price = isPrice ? (value ?? Math.floor(currentPrice * 0.9)) : Math.round(currentPrice * (1 - (value ?? 10) / 100));
   const pct = isPrice ? null : (value ?? 10);
@@ -88,6 +94,13 @@ export default function AlertStepper({ currency, currentPrice, range, mode, onMo
     on: isPrice && value === Math.floor(currentPrice * (1 - off / 100)),
     pick: () => onChange(Math.floor(currentPrice * (1 - off / 100))),
   }));
+  if (suggestion && suggestion.price < currentPrice) {
+    priceChips.push({
+      label: `${suggestion.label} · ${formatPrice(suggestion.price, currency)}`,
+      on: isPrice && value === suggestion.price,
+      pick: () => onChange(suggestion.price),
+    });
+  }
   const pctChips = [5, 10, 15, 20].map((n) => ({
     label: `${n}% · ${formatPrice(Math.round(currentPrice * (1 - n / 100)), currency)}`,
     on: !isPrice && value === n,
@@ -179,12 +192,15 @@ export default function AlertStepper({ currency, currentPrice, range, mode, onMo
           <>
             <div className="absolute top-[0.5625rem] h-3 w-0.5 -translate-x-1/2 rounded-full bg-muted-foreground" style={{ left: `${frac(range.average) * 100}%` }} />
             <span className="absolute top-7 -translate-x-1/2 text-[0.65625rem] whitespace-nowrap text-muted-foreground" style={{ left: `${frac(range.average) * 100}%` }}>
-              Avg
+              Avg {formatCompactPrice(range.average, currency)}
             </span>
           </>
         )}
-        <span className="absolute top-7 left-0 text-[0.65625rem] text-muted-foreground">{formatPrice(lo, currency)}</span>
-        <span className="absolute top-7 right-0 text-[0.65625rem] text-muted-foreground">{formatPrice(hi, currency)}</span>
+        <span className="absolute top-7 left-0 text-[0.65625rem] text-muted-foreground">{formatCompactPrice(lo, currency)}</span>
+        <span className="absolute top-7 right-0 text-[0.65625rem] text-muted-foreground">
+          {range ? "High " : ""}
+          {formatCompactPrice(hi, currency)}
+        </span>
         <div
           className="absolute top-[0.3125rem] box-border size-5 -translate-x-1/2 rounded-full border-2 border-foreground bg-background shadow-md"
           style={{ left: `${knob}%` }}

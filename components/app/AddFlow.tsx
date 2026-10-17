@@ -23,6 +23,7 @@ import { addProduct, previewProduct, type ProductPreview } from "@/app/actions/p
 import AlertRuleFields, { useAlertRule } from "@/components/product/AlertRuleFields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { readClipboardLinkQuietly } from "@/lib/clipboard";
 import type { CollectionRow } from "@/lib/db/schema";
 import { formatDate, formatPercent, formatPrice, hostname, percentChange } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,8 @@ type Props = {
   collections: Collection[];
   /** Read this link on arrival (a link shared into the app). */
   initialUrl?: string;
+  /** Fill the box from the clipboard on arrival, if that needs no permission prompt. */
+  fromClipboard?: boolean;
   /** Called with the tracking id once the product is being tracked. */
   onAdded?: (productId: string) => void;
   onAddingChange?: (adding: boolean) => void;
@@ -53,7 +56,7 @@ const chipOff = "bg-card text-foreground/80 hover:bg-accent";
  * collection and track it, all in one place. Reading happens once, here; tracking attaches to the
  * stored reading, so the price shown is the price you get.
  */
-export default function AddFlow({ collections, initialUrl, onAdded, onAddingChange }: Props) {
+export default function AddFlow({ collections, initialUrl, fromClipboard = false, onAdded, onAddingChange }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const latestRead = useRef(0);
@@ -92,6 +95,18 @@ export default function AddFlow({ collections, initialUrl, onAdded, onAddingChan
       if (result.ok && window.matchMedia("(pointer: coarse)").matches) inputRef.current?.blur();
     });
   }, []);
+
+  // The + tab opens with the copied link already in the box, unless something was typed first.
+  useEffect(() => {
+    if (!fromClipboard || initialUrl) return;
+    let alive = true;
+    void readClipboardLinkQuietly().then((link) => {
+      if (alive && link) setUrl((typed) => typed || link);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [fromClipboard, initialUrl]);
 
   // Read a valid link shortly after it stops changing. State is only set inside the timer.
   useEffect(() => {

@@ -11,7 +11,8 @@ export default function MarkAllRead() {
     <Button
       variant="outline"
       size="sm"
-      className="gap-1.5"
+      // A plain orange text button on a phone, as in the header of the design.
+      className="gap-1.5 max-md:h-11 max-md:border-0 max-md:bg-transparent max-md:pr-1 max-md:pl-2.5 max-md:text-sm max-md:text-primary max-md:shadow-none max-md:[&_svg]:size-[1.0625rem]"
       disabled={pending}
       onClick={() => startTransition(async () => void (await markAllAlertsRead()))}
     >

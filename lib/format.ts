@@ -56,6 +56,20 @@ export function formatPrice(amount: number, currency: string) {
   }
 }
 
+/** "₹18K", "$1.2K", "$95": short prices for scales and axes. */
+export function formatCompactPrice(amount: number, currency: string) {
+  try {
+    return new Intl.NumberFormat(LOCALE, {
+      style: "currency",
+      currency,
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(amount);
+  } catch {
+    return formatPrice(amount, currency);
+  }
+}
+
 export function formatPercent(value: number, { signed = false } = {}) {
   const abs = Math.abs(value);
   const text = `${abs < 10 ? abs.toFixed(1) : abs.toFixed(0)}%`;

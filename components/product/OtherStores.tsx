@@ -1,7 +1,7 @@
 import { ExternalLink, PackageX } from "lucide-react";
 import CompareStoresButton from "@/components/product/CompareStoresButton";
 import type { StoreOffer } from "@/lib/evidence";
-import { formatPercent, formatPrice, percentChange, timeAgo } from "@/lib/format";
+import { formatPrice, timeAgo } from "@/lib/format";
 import { retailerName } from "@/lib/retailers";
 import { cn } from "@/lib/utils";
 
@@ -9,11 +9,13 @@ export default function OtherStores({
   productId,
   offers,
   currentPrice,
+  currency,
   comparedAt,
 }: {
   productId: string;
   offers: StoreOffer[];
   currentPrice: number;
+  currency: string;
   comparedAt: string | null;
 }) {
   if (!comparedAt) {
@@ -35,38 +37,44 @@ export default function OtherStores({
       ) : (
         <ul className="flex flex-col divide-y">
           {offers.map((o) => {
-            const diff = percentChange(currentPrice, o.price);
+            const diff = o.price - currentPrice;
             return (
               <li key={o.url}>
                 <a
                   href={o.url}
                   target="_blank"
                   rel="noopener noreferrer nofollow"
-                  className="flex items-center gap-3 py-2.5 hover:opacity-80 pointer-coarse:py-3"
+                  className="flex min-h-14 items-center gap-3 py-2 hover:opacity-80"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-2 text-sm font-medium">
+                    <p className="flex items-center gap-1.5 text-[0.9375rem] font-medium">
                       {retailerName(o.retailer)}
                       <span
                         className={cn(
-                          "rounded-full px-1.5 py-0.5 text-[0.625rem] font-medium tracking-caption",
-                          o.match === "exact" ? "bg-success/12 text-success" : "bg-muted text-muted-foreground"
+                          "rounded-full px-[0.4375rem] py-px text-[0.6875rem] font-medium",
+                          o.match === "exact" ? "bg-chart-2/15 text-chart-2" : "bg-muted text-muted-foreground"
                         )}
                       >
-                        {o.match === "exact" ? "Same item" : "Similar"}
+                        {o.match === "exact" ? "Exact" : "Similar"}
                       </span>
                     </p>
-                    {!o.inStock && (
+                    {o.inStock ? (
+                      <p className="text-xs text-muted-foreground" suppressHydrationWarning>
+                        In stock · checked {timeAgo(o.checkedAt)}
+                      </p>
+                    ) : (
                       <p className="flex items-center gap-1 text-xs text-danger">
                         <PackageX className="size-3" /> Out of stock
                       </p>
                     )}
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="font-semibold tabular-nums">{formatPrice(o.price, o.currency)}</p>
-                    {diff !== 0 && (
-                      <p className={cn("text-xs", diff < 0 ? "text-success" : "text-muted-foreground")}>
-                        {formatPercent(diff, { signed: true })} vs here
+                    <p className="text-[0.9375rem] font-semibold tabular-nums">{formatPrice(o.price, o.currency)}</p>
+                    {/* A money difference only makes sense in the same currency. */}
+                    {diff !== 0 && o.currency === currency && (
+                      <p className={cn("text-xs font-medium tabular-nums", diff < 0 ? "text-success" : "text-danger")}>
+                        {diff < 0 ? "−" : "+"}
+                        {formatPrice(Math.abs(diff), o.currency).replace(/\.00$/, "")}
                       </p>
                     )}
                   </div>
