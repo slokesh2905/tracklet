@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 import { saveSettings, testDiscordWebhook } from "@/app/actions/settings";
+import PushToggle from "@/components/app/PushToggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,8 @@ import type { UserSettingsRow } from "@/lib/db/schema";
 
 type Props = {
   email: string;
+  /** Present when push notifications are set up on this deployment. */
+  pushKey: string | null;
   settings: Omit<UserSettingsRow, "user_id" | "updated_at">;
 };
 
@@ -29,7 +32,7 @@ function Row({ title, description, children }: { title: string; description: str
   );
 }
 
-export default function SettingsForm({ email, settings }: Props) {
+export default function SettingsForm({ email, pushKey, settings }: Props) {
   const [currency, setCurrency] = useState(settings.preferred_currency as CurrencyCode);
   const [emailAlerts, setEmailAlerts] = useState(settings.email_alerts);
   const [digest, setDigest] = useState(settings.weekly_digest);
@@ -78,6 +81,7 @@ export default function SettingsForm({ email, settings }: Props) {
           <Row title="Weekly digest" description="A Monday summary of how your tracked prices moved.">
             <Switch checked={digest} onCheckedChange={setDigest} aria-label="Weekly digest" />
           </Row>
+          {pushKey && <PushToggle publicKey={pushKey} />}
           <div className="flex flex-col gap-2 py-4">
             <Label htmlFor="discord">Discord webhook (optional)</Label>
             <p className="text-sm text-muted-foreground">

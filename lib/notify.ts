@@ -6,6 +6,7 @@ import { env } from "@/lib/env";
 import { formatPercent, formatPrice, percentChange } from "@/lib/format";
 import PriceAlertEmail from "@/emails/PriceAlertEmail";
 import { sendEmail } from "@/lib/mailer";
+import { pushPayload, sendPush, type PushTarget } from "@/lib/push";
 
 type DiscordEmbed = {
   title: string;
@@ -41,12 +42,16 @@ export type AlertRecipient = {
   email: string | null;
   emailAlerts: boolean;
   discordWebhookUrl: string | null;
+  /** One entry per device that turned push on. */
+  pushTargets: PushTarget[];
 };
 
 /** Send one alert to every channel the user enabled. Returns channels that succeeded. */
 export async function deliverAlert(
   message: AlertMessage,
-  recipient: AlertRecipient
+  recipient: AlertRecipient,
+  /** Called with each push endpoint the browser says no longer exists, so it can be forgotten. */
+  onPushGone?: (endpoint: string) => Promise<void>
 ): Promise<string[]> {
   const copy = ALERT_COPY[message.kind];
   const detailUrl = `${env.NEXT_PUBLIC_APP_URL}/products/${message.productId}`;
@@ -81,6 +86,21 @@ export async function deliverAlert(
           { name: "Change", value: formatPercent(change, { signed: true }), inline: true },
         ],
       }).then(() => void delivered.push("discord"))
+    );
+  }
+
+  if (recipient.pushTargets.length > 0) {
+    const payload = pushPayload(message);
+    jobs.push(
+      Promise.all(
+        recipient.pushTargets.map(async (target) => {
+          const result = await sendPush(target, payload);
+          if (result === "gone") await onPushGone?.(target.endpoint);
+          return result;
+        })
+      ).then((results) => {
+        if (results.includes("ok")) delivered.push("push");
+      })
     );
   }
 

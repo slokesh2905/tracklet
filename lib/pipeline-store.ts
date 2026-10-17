@@ -1,9 +1,10 @@
 import "server-only";
 import { and, eq, not, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { alerts, catalogItems, priceHistory, products, user, userSettings } from "@/lib/db/schema";
+import { alerts, catalogItems, priceHistory, products, pushSubscriptions, user, userSettings } from "@/lib/db/schema";
 import { deliverAlert, type AlertRecipient } from "@/lib/notify";
 import type { PipelineItem, PipelineStore } from "@/lib/pipeline";
+import { isPushConfigured } from "@/lib/push";
 
 /** A user's email + notification settings (defaults when they never saved settings). */
 export async function loadRecipient(userId: string): Promise<AlertRecipient> {
@@ -17,10 +18,19 @@ export async function loadRecipient(userId: string): Promise<AlertRecipient> {
     .leftJoin(userSettings, eq(userSettings.user_id, user.id))
     .where(eq(user.id, userId));
 
+  // Devices are a list, so they get their own query rather than fanning out the join above.
+  const pushTargets = isPushConfigured()
+    ? await db
+        .select({ endpoint: pushSubscriptions.endpoint, p256dh: pushSubscriptions.p256dh, auth: pushSubscriptions.auth })
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.user_id, userId))
+    : [];
+
   return {
     email: row?.email ?? null,
     emailAlerts: row?.emailAlerts ?? true,
     discordWebhookUrl: row?.discordWebhookUrl ?? null,
+    pushTargets,
   };
 }
 
@@ -145,7 +155,8 @@ export function createDbPipelineStore(): PipelineStore {
           newPrice: event.newPrice,
           currency: event.currency,
         },
-        await recipient
+        await recipient,
+        async (endpoint) => void (await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint)))
       );
 
       await db.insert(alerts).values({

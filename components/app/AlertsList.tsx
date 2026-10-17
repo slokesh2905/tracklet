@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRight, BellOff, Check, ImageOff, Mail, MessageSquare, Trash2 } from "lucide-react";
+import { ArrowRight, Bell, BellOff, Check, ImageOff, Mail, MessageSquare, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { deleteAlert, setAlertRead } from "@/app/actions/alerts";
 import MarkAllRead from "@/components/app/MarkAllRead";
@@ -26,6 +26,7 @@ export type AlertItem = {
   read: boolean;
   email: boolean;
   discord: boolean;
+  push: boolean;
 };
 
 const FILTERS: Array<{ value: "all" | "unread" | AlertKind; label: string }> = [
@@ -175,6 +176,7 @@ function AlertRow({
             <span className="flex gap-1.5">
               {alert.email && <Mail className="size-[0.8125rem]" aria-label="Sent by email" />}
               {alert.discord && <MessageSquare className="size-[0.8125rem]" aria-label="Sent to Discord" />}
+              {alert.push && <Bell className="size-[0.8125rem]" aria-label="Sent as a push notification" />}
             </span>
           </div>
         </Link>

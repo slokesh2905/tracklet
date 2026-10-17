@@ -19,6 +19,7 @@ export default async function AlertsPage() {
     read: !!a.read_at,
     email: a.channels.includes("email"),
     discord: a.channels.includes("discord"),
+    push: a.channels.includes("push"),
   }));
 
   return <AlertsList alerts={items} />;

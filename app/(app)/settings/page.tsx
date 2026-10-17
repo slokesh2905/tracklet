@@ -1,5 +1,8 @@
+import Bookmarklet from "@/components/app/Bookmarklet";
 import SettingsForm from "@/components/app/SettingsForm";
 import { getSettings } from "@/lib/data";
+import { env } from "@/lib/env";
+import { vapidPublicKey } from "@/lib/push";
 import { getUser } from "@/lib/session";
 
 export const metadata = { title: "Settings" };
@@ -15,6 +18,7 @@ export default async function SettingsPage() {
       </div>
       <SettingsForm
         email={user?.email ?? ""}
+        pushKey={vapidPublicKey()}
         settings={{
           preferred_currency: settings.preferred_currency,
           email_alerts: settings.email_alerts,
@@ -22,6 +26,9 @@ export default async function SettingsPage() {
           discord_webhook_url: settings.discord_webhook_url,
         }}
       />
+      <div className="max-md:hidden">
+        <Bookmarklet origin={env.NEXT_PUBLIC_APP_URL} />
+      </div>
     </div>
   );
 }

@@ -10,6 +10,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Plain browser script, not part of the app bundle.
+    "public/**",
   ]),
 ]);
 
