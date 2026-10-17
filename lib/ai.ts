@@ -62,6 +62,16 @@ function describeEvidence(name: string, e: Evidence) {
       `At its lowest recorded price: ${i.isAllTimeLow ? "yes" : "no"}`
     );
   }
+  const check = e.discountCheck;
+  if (check.status === "unverified") {
+    lines.push(
+      `MRP check: the MRP was never charged in the ${check.daysTracked} days tracked (highest price seen ${p(check.highestSeen)}), so the "${e.discountPct!.toFixed(0)}% off" figure is not a real saving`
+    );
+  } else if (check.status === "inflated") {
+    lines.push(
+      `Price check: it was raised from ${p(check.from)} to ${p(check.peak)} shortly before the current drop, which only returned it to ${p(check.from)}`
+    );
+  }
   if (e.bestOffer) {
     lines.push(`Same item elsewhere: ${e.bestOffer.retailer} at ${p(e.bestOffer.price)} (${e.bestOffer.savingPct.toFixed(0)}% cheaper, in stock)`);
   }
@@ -99,7 +109,8 @@ export async function generateDealVerdict(input: { name: string; evidence: Evide
     system:
       "You are a careful shopping assistant. Decide buy_now, wait or fair using only the evidence given, " +
       "and cite specific numbers (discount off MRP, price range, other stores). If history is short, say what " +
-      "the other evidence shows instead of saying there is no data. Never invent prices, stores or sale events.",
+      "the other evidence shows instead of saying there is no data. If an MRP or price check says the discount is " +
+      "not real, do not count it as a saving. Never invent prices, stores or sale events.",
     prompt: facts,
     temperature: 0.2,
   });

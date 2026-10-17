@@ -17,7 +17,9 @@ function evidence(historyDays: number[], offers: StoreOffer[] = [], price = 2510
     firstSeen: iso(Math.max(0, ...historyDays)),
     shoppers: 1,
     insights: computeInsights(history, price, NOW),
+    history,
     offers,
+    now: NOW,
   });
 }
 

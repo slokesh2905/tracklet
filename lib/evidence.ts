@@ -1,5 +1,6 @@
+import { checkDiscount, type DiscountCheck } from "@/lib/discount-check";
 import { DAY_MS, percentChange } from "@/lib/format";
-import type { Insights } from "@/lib/insights";
+import type { Insights, PricePoint } from "@/lib/insights";
 
 export type StoreOffer = {
   retailer: string;
@@ -19,6 +20,8 @@ export type Evidence = {
   originalPrice: number | null;
   /** Discount off MRP in percent (positive = cheaper than MRP). */
   discountPct: number | null;
+  /** Whether that MRP was ever really charged while we watched. */
+  discountCheck: DiscountCheck;
   inStock: boolean;
   firstSeen: string;
   shoppers: number;
@@ -49,9 +52,12 @@ export function buildEvidence(input: {
   firstSeen: string;
   shoppers: number;
   insights: Insights;
+  history: PricePoint[];
   offers: StoreOffer[];
+  now?: number;
 }): Evidence {
-  const { currentPrice, currency, originalPrice, offers } = input;
+  const { history, now, ...rest } = input;
+  const { currentPrice, currency, originalPrice, offers } = rest;
   const usable = offers.filter((o) => o.currency === currency && o.inStock && o.price > 0);
 
   const best = usable
@@ -59,9 +65,10 @@ export function buildEvidence(input: {
     .sort((a, b) => a.price - b.price)[0];
 
   return {
-    ...input,
+    ...rest,
     discountPct: originalPrice && originalPrice > currentPrice ? -percentChange(originalPrice, currentPrice) : null,
-    coverage: coverageOf(input.insights),
+    discountCheck: checkDiscount({ history, currentPrice, originalPrice, now }),
+    coverage: coverageOf(rest.insights),
     bestOffer: best ? { ...best, savingPct: -percentChange(currentPrice, best.price) } : null,
     similarOffers: usable.filter((o) => o.match === "similar"),
   };

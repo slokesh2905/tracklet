@@ -20,6 +20,7 @@ import {
   type UserSettingsRow,
 } from "@/lib/db/schema";
 import { isGreatDeal } from "@/lib/deals";
+import type { DiscountCheck } from "@/lib/discount-check";
 import { buildEvidence, gateVerdict, type Evidence, type Gate, type StoreOffer } from "@/lib/evidence";
 import { DAY_MS } from "@/lib/format";
 import { computeInsights, type Insights, type PricePoint } from "@/lib/insights";
@@ -46,6 +47,8 @@ export type DashboardProduct = ProductRow & {
   verdict: ItemInsightRow["verdict"] | null;
   /** How many users track this product (shared price data). */
   shoppers: number;
+  /** Whether the crossed-out list price was ever really charged. */
+  discountCheck: DiscountCheck;
   bestOffer: BestOffer | null;
 };
 
@@ -100,6 +103,17 @@ export const getUnreadAlertCount = cache(async () => {
   return row?.n ?? 0;
 });
 
+/** Just enough of the user's collections to offer them in a picker. */
+export const getCollectionList = cache(async (): Promise<Pick<CollectionRow, "id" | "name">[]> => {
+  const user = await getUser();
+  if (!user) return [];
+  return db.query.collections.findMany({
+    columns: { id: true, name: true },
+    where: eq(collections.user_id, user.id),
+    orderBy: asc(collections.created_at),
+  });
+});
+
 function statusOf(created: string, current: number, firstPrice: number, points: number, now: number): ProductStatus {
   if (points <= 1 && now - new Date(created).getTime() < DAY_MS) return "new";
   if (current < firstPrice) return "dropped";
@@ -126,7 +140,9 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
     firstSeen: history[0]?.checked_at ?? item.created_at,
     shoppers: item.trackers.length,
     insights,
+    history,
     offers: toStoreOffers(item.offers),
+    now,
   });
 
   return {
@@ -141,6 +157,7 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
     spark: history.slice(-30).map((h) => h.price),
     verdict: item.insight?.verdict ?? null,
     shoppers: item.trackers.length,
+    discountCheck: evidence.discountCheck,
     bestOffer: evidence.bestOffer
       ? { retailer: evidence.bestOffer.retailer, url: evidence.bestOffer.url, price: evidence.bestOffer.price, savingPct: evidence.bestOffer.savingPct }
       : null,
@@ -236,6 +253,7 @@ export async function getProductDetail(id: string) {
     firstSeen: history[0]?.checked_at ?? item.created_at,
     shoppers: item.trackers.length,
     insights,
+    history,
     offers,
   });
   const gate: Gate = gateVerdict(evidence);

@@ -6,7 +6,8 @@ import AiVerdictCard from "@/components/product/AiVerdictCard";
 import AlertKindIcon from "@/components/product/AlertKindIcon";
 import OtherStores from "@/components/product/OtherStores";
 import AlertRulesForm from "@/components/product/AlertRulesForm";
-import { AllTimeLowBadge, DealBadge } from "@/components/product/Badges";
+import { AllTimeLowBadge, DealBadge, DiscountCheckBadge } from "@/components/product/Badges";
+import DiscountCheckPanel from "@/components/product/DiscountCheckPanel";
 import InsightsPanel from "@/components/product/InsightsPanel";
 import PriceChart from "@/components/product/PriceChart";
 import ProductActions from "@/components/product/ProductActions";
@@ -49,6 +50,8 @@ export default async function ProductPage({ params }: Params) {
     product.original_price && Number(product.original_price) > product.current_price
       ? percentChange(Number(product.original_price), product.current_price)
       : null;
+  // Only the list price itself is "not verified"; a pre-sale hike is called out by its badge and panel.
+  const discountFlagged = evidence.discountCheck.status === "unverified";
   const targetPrice = product.target_price === null ? null : Number(product.target_price);
   const alertPct = product.alert_pct === null ? null : Number(product.alert_pct);
   // Price history is a step function; with a single point there is no range to draw a scale from.
@@ -115,7 +118,13 @@ export default async function ProductPage({ params }: Params) {
             {discount !== null && (
               <span className="text-sm text-muted-foreground">
                 <s>{formatPrice(Number(product.original_price), product.currency)}</s>{" "}
-                <span className="font-medium text-success">{formatPercent(discount, { signed: true })} off list</span>
+                {discountFlagged ? (
+                  <span className="font-medium text-amber-700 dark:text-amber-300">
+                    {formatPercent(discount, { signed: true })} off list · not verified
+                  </span>
+                ) : (
+                  <span className="font-medium text-success">{formatPercent(discount, { signed: true })} off list</span>
+                )}
               </span>
             )}
           </div>
@@ -127,6 +136,7 @@ export default async function ProductPage({ params }: Params) {
             )}
             {insights.isAllTimeLow && <AllTimeLowBadge />}
             {insights.dataPoints > 1 && <DealBadge score={insights.dealScore} label={insights.dealLabel} />}
+            <DiscountCheckBadge check={evidence.discountCheck} />
             {targetPrice !== null && product.current_price <= targetPrice && (
               <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground md:hidden">
                 Under your {formatPrice(targetPrice, product.currency)}
@@ -176,6 +186,17 @@ export default async function ProductPage({ params }: Params) {
               lowestPrice={insights.dataPoints > 1 ? insights.allTime.low : null}
             />
           </Section>
+          {evidence.discountCheck.status !== "none" && (
+            <Section title="Is this discount real?" className="max-lg:order-2">
+              <DiscountCheckPanel
+                check={evidence.discountCheck}
+                currency={product.currency}
+                originalPrice={evidence.originalPrice}
+                discountPct={evidence.discountPct}
+                firstSeen={evidence.firstSeen}
+              />
+            </Section>
+          )}
           <Section title="Insights" className="max-lg:order-3">
             <InsightsPanel insights={insights} currency={product.currency} currentPrice={product.current_price} />
           </Section>
@@ -197,6 +218,7 @@ export default async function ProductPage({ params }: Params) {
                   daysTracked: insights.daysTracked,
                   shoppers: evidence.shoppers,
                   firstSeen: evidence.firstSeen,
+                  discountFlagged,
                 }}
               />
             </div>

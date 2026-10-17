@@ -1,6 +1,7 @@
-import { Minus, Sparkles, Trophy, TrendingDown, TrendingUp } from "lucide-react";
+import { Minus, ShieldAlert, Sparkles, Trophy, TrendingDown, TrendingUp } from "lucide-react";
 import type { ProductStatus } from "@/lib/data";
 import type { Verdict } from "@/lib/db/schema";
+import { isDiscountFlagged, type DiscountCheck } from "@/lib/discount-check";
 import { formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,16 @@ export function AllTimeLowBadge() {
   return (
     <span className={cn(pill, "bg-primary/12 text-primary")}>
       <Trophy className="size-3" /> All-time low
+    </span>
+  );
+}
+
+/** Amber warning pill for a discount that failed the check; renders nothing for any other status. */
+export function DiscountCheckBadge({ check }: { check: DiscountCheck }) {
+  if (!isDiscountFlagged(check)) return null;
+  return (
+    <span className={cn(pill, "bg-amber-500/15 text-amber-700 dark:text-amber-300")}>
+      <ShieldAlert className="size-3" /> {check.status === "inflated" ? "Raised before sale" : "List price not verified"}
     </span>
   );
 }

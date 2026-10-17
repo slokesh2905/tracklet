@@ -18,7 +18,7 @@ import {
 import { toast } from "sonner";
 import { deleteProduct, moveToCollection } from "@/app/actions/products";
 import AlertRulesForm from "@/components/product/AlertRulesForm";
-import { AllTimeLowBadge, ChangeBadge, DealBadge, VerdictBadge } from "@/components/product/Badges";
+import { AllTimeLowBadge, ChangeBadge, DealBadge, DiscountCheckBadge, VerdictBadge } from "@/components/product/Badges";
 import Sparkline from "@/components/product/Sparkline";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { DashboardProduct } from "@/lib/data";
 import type { CollectionRow } from "@/lib/db/schema";
+import { isDiscountFlagged } from "@/lib/discount-check";
 import { formatPercent, formatPrice, hostname, percentChange, timeAgo } from "@/lib/format";
 import { retailerName } from "@/lib/retailers";
 import { deleteWithUndo } from "@/lib/undo";
@@ -98,6 +99,8 @@ export default function ProductCard({ product, collections }: Props) {
   // On a phone the change badge sits beside the price instead.
   badges.push({ node: <ChangeBadge status={product.status} percentChange={product.percentChange} />, desktopOnly: true });
   if (product.isAllTimeLow && product.status !== "new") badges.push({ node: <AllTimeLowBadge /> });
+  // Ahead of the deal badge so it survives the two-badge cap on a phone.
+  if (isDiscountFlagged(product.discountCheck)) badges.push({ node: <DiscountCheckBadge check={product.discountCheck} /> });
   if (product.status !== "new" && product.in_stock) badges.push({ node: <DealBadge score={product.dealScore} label={product.dealLabel} /> });
   if (product.verdict) badges.push({ node: <VerdictBadge verdict={product.verdict} /> });
   if (product.bestOffer && product.bestOffer.savingPct >= 3) {

@@ -19,6 +19,8 @@ type Facts = {
   daysTracked: number;
   shoppers: number;
   firstSeen: string;
+  /** The MRP failed the discount check, so "% off" is not a reliable saving. */
+  discountFlagged: boolean;
 };
 
 type Props = {
@@ -66,6 +68,7 @@ export default function AiVerdictCard({ productId, verdict, stale, aiEnabled, ga
             <Fact icon={Tag}>
               <span className="font-medium">{facts.discountPct.toFixed(0)}% off</span> the MRP of{" "}
               {formatPrice(facts.originalPrice, facts.currency)}
+              {facts.discountFlagged && <span className="text-muted-foreground"> (not verified)</span>}
             </Fact>
           )}
           <Fact icon={Users}>
