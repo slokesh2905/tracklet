@@ -2,7 +2,7 @@
 
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq, min, ne } from "drizzle-orm";
 import { fail, type ActionResult } from "@/lib/action-result";
 import { categorizeProduct, generateDealVerdict, isAiEnabled } from "@/lib/ai";
 import { aiModelId } from "@/lib/ai-provider";
@@ -119,6 +119,10 @@ export type ProductPreview = {
   inStock: boolean;
   /** Set when the user already tracks this product. */
   trackedProductId: string | null;
+  /** Other people already tracking it: they share its price history. */
+  otherShoppers: number;
+  /** The first price we recorded for it, if any. */
+  historySince: string | null;
 };
 
 /**
@@ -141,10 +145,17 @@ export async function previewProduct(rawUrl: string): Promise<ActionResult<{ pre
     item = read.item;
   }
 
-  const tracking = await db.query.products.findFirst({
-    columns: { id: true },
-    where: and(eq(products.user_id, user.id), eq(products.catalog_item_id, item.id)),
-  });
+  const [tracking, [others], [first]] = await Promise.all([
+    db.query.products.findFirst({
+      columns: { id: true },
+      where: and(eq(products.user_id, user.id), eq(products.catalog_item_id, item.id)),
+    }),
+    db
+      .select({ n: count() })
+      .from(products)
+      .where(and(eq(products.catalog_item_id, item.id), ne(products.user_id, user.id))),
+    db.select({ at: min(priceHistory.checked_at) }).from(priceHistory).where(eq(priceHistory.catalog_item_id, item.id)),
+  ]);
   return {
     ok: true,
     preview: {
@@ -155,6 +166,8 @@ export async function previewProduct(rawUrl: string): Promise<ActionResult<{ pre
       currency: item.currency,
       inStock: item.in_stock,
       trackedProductId: tracking?.id ?? null,
+      otherShoppers: others?.n ?? 0,
+      historySince: first?.at ?? null,
     },
   };
 }

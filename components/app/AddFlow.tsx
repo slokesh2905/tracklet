@@ -1,9 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BellRing, Check, ChevronRight, ImageOff, Link2, Loader2, PackageX, Plus } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  CircleCheck,
+  CircleX,
+  ClipboardPaste,
+  FolderHeart,
+  ImageOff,
+  Link2,
+  Loader2,
+  PackageX,
+  Plus,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 import { createCollection } from "@/app/actions/collections";
 import { addProduct, previewProduct, type ProductPreview } from "@/app/actions/products";
@@ -11,8 +24,9 @@ import AlertRuleFields, { useAlertRule } from "@/components/product/AlertRuleFie
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CollectionRow } from "@/lib/db/schema";
-import { formatPercent, formatPrice, hostname, percentChange } from "@/lib/format";
+import { formatDate, formatPercent, formatPrice, hostname, percentChange } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { productUrlSchema } from "@/lib/validation";
 
 type Collection = Pick<CollectionRow, "id" | "name">;
 
@@ -23,38 +37,86 @@ type Props = {
   /** Called with the tracking id once the product is being tracked. */
   onAdded?: (productId: string) => void;
   onAddingChange?: (adding: boolean) => void;
-  /** Lets a host hide its own controls while a product is being previewed. */
-  onPreviewingChange?: (previewing: boolean) => void;
 };
 
-const chip =
-  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium pointer-coarse:h-10 pointer-coarse:px-3.5";
+/** Wait this long after the last keystroke before reading a link, so typing doesn't read half-links. */
+const TYPING_DELAY_MS = 600;
 
-function PreviewStep({
-  url,
-  preview,
-  collections,
-  onBack,
-  onAdded,
-  onAddingChange,
-}: { url: string; preview: ProductPreview; onBack: () => void } & Pick<Props, "collections" | "onAdded" | "onAddingChange">) {
+type Read = { source: string; preview: ProductPreview } | { source: string; error: string };
+
+const chipClass = "h-10 shrink-0 rounded-full border px-3.5 text-[0.8125rem] font-medium whitespace-nowrap";
+const chipOn = "border-primary bg-primary/10 text-primary";
+const chipOff = "bg-card text-foreground/80 hover:bg-accent";
+
+/**
+ * Paste a link and the product appears as soon as it has been read; then choose an alert and a
+ * collection and track it, all in one place. Reading happens once, here; tracking attaches to the
+ * stored reading, so the price shown is the price you get.
+ */
+export default function AddFlow({ collections, initialUrl, onAdded, onAddingChange }: Props) {
   const router = useRouter();
-  const rule = useAlertRule({ currentPrice: preview.price });
-  const [alertOpen, setAlertOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const latestRead = useRef(0);
+  const [url, setUrl] = useState(initialUrl ?? "");
+  const [reading, setReading] = useState(false);
+  const [read, setRead] = useState<Read | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [alertChoice, setAlertChoice] = useState<"any" | "5" | "10" | "custom">("any");
   const [collectionId, setCollectionId] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
   const [created, setCreated] = useState<Collection[]>([]);
   const [naming, setNaming] = useState(false);
   const [newName, setNewName] = useState("");
-  const [busy, setBusy] = useState(false);
 
+  const trimmed = url.trim();
+  const validUrl = productUrlSchema.safeParse(trimmed).success;
+  // What was read only counts while the box still holds the link it was read from.
+  const current = read && read.source === trimmed ? read : null;
+  const preview = current && "preview" in current ? current.preview : null;
+  const error = current && "error" in current ? current.error : null;
+
+  const price = preview?.price ?? 0;
+  const rule = useAlertRule({ currentPrice: price || 1 });
   const all = [...collections, ...created.filter((c) => !collections.some((k) => k.id === c.id))];
-  const discount = preview.originalPrice && preview.originalPrice > preview.price ? percentChange(preview.originalPrice, preview.price) : null;
+  const chosen = all.find((c) => c.id === collectionId);
 
-  function toggleAlert() {
-    if (alertOpen) rule.clear();
-    // Opening seeds a sensible starting target, as the stepper would otherwise show a value that isn't saved.
-    else rule.changeMode("price");
-    setAlertOpen(!alertOpen);
+  // Only the newest read counts; an older one that lands late is dropped.
+  const load = useCallback((source: string) => {
+    const id = ++latestRead.current;
+    setReading(true);
+    void previewProduct(source).then((result) => {
+      if (id !== latestRead.current) return;
+      setReading(false);
+      setRead(result.ok ? { source, preview: result.preview } : { source, error: result.error });
+      // The keyboard has done its job: put it away so the product and the button are in view.
+      if (result.ok && window.matchMedia("(pointer: coarse)").matches) inputRef.current?.blur();
+    });
+  }, []);
+
+  // Read a valid link shortly after it stops changing. State is only set inside the timer.
+  useEffect(() => {
+    if (!validUrl || (read && read.source === trimmed)) return;
+    const timer = setTimeout(() => load(trimmed), trimmed === initialUrl ? 0 : TYPING_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [trimmed, validUrl, read, initialUrl, load]);
+
+  function chooseAlert(choice: typeof alertChoice) {
+    setAlertChoice(choice);
+    if (choice === "any") rule.clear();
+    else if (choice === "custom") rule.changeMode("price");
+    else {
+      rule.setPct("");
+      rule.setTarget(String(Math.floor(price * (1 - Number(choice) / 100))));
+    }
+  }
+
+  async function paste() {
+    try {
+      setUrl((await navigator.clipboard.readText()).trim());
+      inputRef.current?.focus();
+    } catch {
+      toast.error("Couldn't read the clipboard. Paste into the box instead.");
+    }
   }
 
   async function makeCollection() {
@@ -67,16 +129,19 @@ function PreviewStep({
     setCollectionId(result.id);
     setNaming(false);
     setNewName("");
+    setPicking(false);
     router.refresh();
   }
 
   async function track() {
+    if (!preview) return;
     setBusy(true);
     onAddingChange?.(true);
-    const result = await addProduct(url, {
+    const withRule = alertChoice !== "any";
+    const result = await addProduct(trimmed, {
       collectionId,
-      targetPrice: alertOpen ? rule.target : null,
-      alertPct: alertOpen ? rule.pct : null,
+      targetPrice: withRule ? rule.target : null,
+      alertPct: withRule ? rule.pct : null,
     });
     onAddingChange?.(false);
     setBusy(false);
@@ -85,223 +150,242 @@ function PreviewStep({
     onAdded?.(result.productId);
   }
 
+  const discount =
+    preview?.originalPrice && preview.originalPrice > preview.price ? percentChange(preview.originalPrice, preview.price) : null;
+  const dropChips: Array<{ key: typeof alertChoice; label: string }> = preview
+    ? [
+        { key: "any", label: "Any drop" },
+        ...(["5", "10"] as const).map((n) => ({
+          key: n,
+          label: `−${n}% · ${formatPrice(Math.floor(preview.price * (1 - Number(n) / 100)), preview.currency)}`,
+        })),
+        { key: "custom", label: "Custom…" },
+      ]
+    : [];
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex gap-3 rounded-2xl border bg-card p-3">
-        <div className="flex size-[4.5rem] shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-white">
-          {preview.imageUrl ? (
-            // Retailer images come from arbitrary hosts; plain img avoids optimiser allow-lists.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview.imageUrl} alt="" className="size-full object-contain p-1" />
-          ) : (
-            <ImageOff className="size-5 text-muted-foreground" />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground">{hostname(url)}</p>
-          <p className="mt-0.5 line-clamp-2 text-[0.9375rem] leading-snug font-semibold text-pretty">{preview.name}</p>
-          <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2">
-            <span className="text-xl font-bold tracking-tight tabular-nums">{formatPrice(preview.price, preview.currency)}</span>
-            {discount !== null && (
-              <span className="text-xs text-muted-foreground">
-                <s>{formatPrice(preview.originalPrice!, preview.currency)}</s> {formatPercent(discount, { signed: true })}
-              </span>
-            )}
-          </p>
-          {!preview.inStock && (
-            <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-danger/12 px-2 py-0.5 text-xs font-medium text-danger">
-              <PackageX className="size-3" /> Out of stock
-            </span>
-          )}
-        </div>
-      </div>
-
-      {preview.trackedProductId ? (
-        <div className="flex flex-col gap-3 rounded-2xl border border-chart-2/25 bg-chart-2/10 p-3.5">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            <Check className="size-4 text-chart-2" /> You&apos;re already tracking this
-          </p>
-          <div className="flex gap-2">
-            <Button asChild className="h-11 flex-1">
-              <Link href={`/products/${preview.trackedProductId}`} onClick={() => onAdded?.(preview.trackedProductId!)}>
-                Open <ChevronRight className="size-4" />
-              </Link>
-            </Button>
-            <Button type="button" variant="outline" className="h-11" onClick={onBack}>
-              Another link
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="rounded-2xl border bg-card">
-            <button
-              type="button"
-              onClick={toggleAlert}
-              aria-expanded={alertOpen}
-              className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
-            >
-              <span className="flex size-[2.125rem] shrink-0 items-center justify-center rounded-[0.625rem] bg-primary/12 text-primary">
-                <BellRing className="size-[1.0625rem]" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[0.9375rem] font-medium">Set a price alert</span>
-                <span className="block text-xs text-muted-foreground">
-                  {alertOpen ? "Remove it to be told about every drop" : "Optional. Otherwise we tell you about every drop"}
-                </span>
-              </span>
-              <span className="text-sm font-medium text-primary">{alertOpen ? "Remove" : "Add"}</span>
-            </button>
-            {alertOpen && (
-              <div className="flex flex-col gap-5 border-t p-3.5">
-                <AlertRuleFields idPrefix="add-flow" currency={preview.currency} currentPrice={preview.price} rule={rule} />
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <p className="text-[0.8125rem] font-semibold text-muted-foreground">Collection</p>
-            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Collection">
-              {[{ id: null, name: "None" }, ...all].map((c) => {
-                const active = collectionId === c.id;
-                return (
-                  <button
-                    key={c.id ?? "none"}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    onClick={() => setCollectionId(c.id)}
-                    className={cn(chip, active ? "border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground")}
-                  >
-                    {c.name}
-                  </button>
-                );
-              })}
-              {!naming && (
-                <button type="button" onClick={() => setNaming(true)} className={cn(chip, "border-dashed bg-card text-muted-foreground hover:bg-accent hover:text-foreground")}>
-                  <Plus className="size-3.5" /> New
-                </button>
-              )}
-            </div>
-            {naming && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void makeCollection();
-                }}
-                className="flex gap-2"
-              >
-                <Input
-                  autoFocus
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Collection name"
-                  aria-label="New collection name"
-                  maxLength={60}
-                  className="bg-background"
-                />
-                <Button type="submit" variant="outline" disabled={busy || !newName.trim()}>
-                  Create
-                </Button>
-              </form>
-            )}
-          </div>
-
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" className="h-12" onClick={onBack} disabled={busy}>
-              Back
-            </Button>
-            <Button type="button" className="h-12 flex-1 gap-2 text-base" onClick={() => void track()} disabled={busy}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-              Start tracking
-            </Button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/**
- * Paste a link, check it's the right product, then choose an alert and a collection in one go.
- * Reading the page happens once, in the preview; tracking attaches to that stored reading.
- */
-export default function AddFlow({ collections, initialUrl, onAdded, onAddingChange, onPreviewingChange }: Props) {
-  const [url, setUrl] = useState(initialUrl ?? "");
-  const [reading, setReading] = useState(Boolean(initialUrl));
-  const [preview, setPreview] = useState<{ url: string; data: ProductPreview } | null>(null);
-
-  function showPreview(next: { url: string; data: ProductPreview } | null) {
-    setPreview(next);
-    onPreviewingChange?.(next !== null);
-  }
-
-  async function read(target: string) {
-    setReading(true);
-    const result = await previewProduct(target);
-    setReading(false);
-    if (result.ok) showPreview({ url: target, data: result.preview });
-    else toast.error(result.error);
-  }
-
-  // State is only set once the read resolves; `cancelled` drops the result of an abandoned effect run.
-  useEffect(() => {
-    if (!initialUrl) return;
-    let cancelled = false;
-    void previewProduct(initialUrl).then((result) => {
-      if (cancelled) return;
-      setReading(false);
-      if (result.ok) setPreview({ url: initialUrl, data: result.preview });
-      else toast.error(result.error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [initialUrl]);
-
-  if (preview) {
-    return (
-      <PreviewStep
-        url={preview.url}
-        preview={preview.data}
-        collections={collections}
-        onAdded={onAdded}
-        onAddingChange={onAddingChange}
-        onBack={() => {
-          showPreview(null);
-          setUrl("");
+    <div className="flex flex-col gap-3.5">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          // Enter reads right away (and retries a failed read) instead of waiting out the typing delay.
+          if (validUrl && !preview && !reading) load(trimmed);
         }}
-      />
-    );
-  }
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        void read(url);
-      }}
-      className="flex flex-col gap-2 sm:flex-row"
-    >
-      <div className="relative flex-1">
-        <Link2 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+        className="flex h-12 items-center gap-2.5 rounded-lg border border-input bg-background pr-1 pl-3 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50"
+      >
+        <Link2 className="size-[1.125rem] shrink-0 text-muted-foreground" />
         <Input
+          ref={inputRef}
           type="url"
+          name="link"
           inputMode="url"
+          enterKeyHint="go"
           autoComplete="off"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="Paste a product link from any store"
           aria-label="Product URL"
-          className="bg-background pl-9"
-          required
-          disabled={reading}
+          aria-invalid={Boolean(error)}
+          className="h-full min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
         />
-      </div>
-      <Button type="submit" disabled={reading} className="gap-2">
-        {reading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-        {reading ? "Reading page…" : "Find product"}
-      </Button>
-    </form>
+        {reading ? (
+          <span className="flex size-9 items-center justify-center" aria-label="Reading page">
+            <Loader2 className="size-[1.125rem] animate-spin text-muted-foreground" />
+          </span>
+        ) : trimmed ? (
+          <button
+            type="button"
+            aria-label="Clear link"
+            onClick={() => {
+              setUrl("");
+              inputRef.current?.focus();
+            }}
+            className="flex size-9 items-center justify-center rounded-full text-muted-foreground"
+          >
+            <CircleX className="size-[1.125rem]" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void paste()}
+            className="flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-primary"
+          >
+            <ClipboardPaste className="size-4" /> Paste
+          </button>
+        )}
+      </form>
+
+      {trimmed && !validUrl && <p className="-mt-1.5 text-xs text-muted-foreground">Paste a full link that starts with https://</p>}
+      {error && (
+        <p role="alert" className="-mt-1.5 text-sm text-danger">
+          {error}
+        </p>
+      )}
+
+      {reading && !preview && (
+        <div className="flex gap-3 rounded-2xl border bg-card p-3" aria-hidden>
+          <div className="size-14 shrink-0 animate-pulse rounded-xl bg-muted" />
+          <div className="flex flex-1 flex-col gap-2 pt-1">
+            <div className="h-3 w-24 animate-pulse rounded bg-muted" />
+            <div className="h-3.5 animate-pulse rounded bg-muted" />
+            <div className="h-3.5 w-1/2 animate-pulse rounded bg-muted" />
+          </div>
+        </div>
+      )}
+
+      {preview && (
+        <>
+          <div className="flex flex-col gap-2.5 rounded-2xl border bg-card p-3">
+            <div className="flex gap-3">
+              <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-white">
+                {preview.imageUrl ? (
+                  // Retailer images come from arbitrary hosts; plain img avoids optimiser allow-lists.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={preview.imageUrl} alt="" className="size-full object-contain p-1" />
+                ) : (
+                  <ImageOff className="size-5 text-muted-foreground" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-1 text-xs font-medium text-success">
+                  <CircleCheck className="size-[0.8125rem]" /> Found on {hostname(trimmed)}
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-sm leading-snug font-medium">{preview.name}</p>
+                <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5">
+                  <span className="text-[1.0625rem] font-bold tabular-nums">{formatPrice(preview.price, preview.currency)}</span>
+                  {discount !== null && (
+                    <span className="text-xs font-medium text-success">{formatPercent(discount, { signed: true })} off list</span>
+                  )}
+                  {!preview.inStock && (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-danger">
+                      <PackageX className="size-3" /> Out of stock
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+            {preview.otherShoppers > 0 && preview.historySince && (
+              <p className="flex items-center gap-2 border-t pt-2.5 text-xs leading-snug text-muted-foreground" suppressHydrationWarning>
+                <Users className="size-3.5 shrink-0" />
+                {preview.otherShoppers === 1 ? "Another shopper already tracks" : `${preview.otherShoppers} other shoppers already track`}{" "}
+                this, so you get its price history back to {formatDate(preview.historySince)}.
+              </p>
+            )}
+          </div>
+
+          {preview.trackedProductId ? (
+            <div className="flex flex-col gap-3 rounded-2xl border border-chart-2/25 bg-chart-2/10 p-3.5">
+              <p className="flex items-center gap-2 text-sm font-medium">
+                <Check className="size-4 text-chart-2" /> You&apos;re already tracking this
+              </p>
+              <Button asChild className="h-11">
+                <Link href={`/products/${preview.trackedProductId}`} onClick={() => onAdded?.(preview.trackedProductId!)}>
+                  Open it <ChevronRight className="size-4" />
+                </Link>
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-2">
+                <span className="text-[0.8125rem] font-semibold">Alert me when it drops</span>
+                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Alert me when it drops">
+                  {dropChips.map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      role="radio"
+                      aria-checked={alertChoice === c.key}
+                      onClick={() => chooseAlert(c.key)}
+                      className={cn(chipClass, alertChoice === c.key ? chipOn : chipOff)}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+                {alertChoice === "custom" && (
+                  <div className="mt-1.5 flex flex-col gap-5 rounded-2xl border bg-card p-3.5">
+                    <AlertRuleFields idPrefix="add-flow" currency={preview.currency} currentPrice={preview.price} rule={rule} />
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border bg-background">
+                <button
+                  type="button"
+                  onClick={() => setPicking(!picking)}
+                  aria-expanded={picking}
+                  className="flex h-11 w-full items-center gap-2.5 pr-2.5 pl-3 text-left"
+                >
+                  <FolderHeart className="size-[1.0625rem] text-muted-foreground" />
+                  <span className="flex-1 text-[0.9375rem]">Collection</span>
+                  <span className="max-w-[40%] truncate text-[0.9375rem] text-muted-foreground">{chosen?.name ?? "None"}</span>
+                  <ChevronRight className={cn("size-4 text-muted-foreground", picking && "rotate-90")} />
+                </button>
+                {picking && (
+                  <div className="flex flex-col gap-2.5 border-t p-3">
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Collection">
+                      {[{ id: null, name: "None" }, ...all].map((c) => (
+                        <button
+                          key={c.id ?? "none"}
+                          type="button"
+                          role="radio"
+                          aria-checked={collectionId === c.id}
+                          onClick={() => {
+                            setCollectionId(c.id);
+                            setPicking(false);
+                          }}
+                          className={cn(chipClass, collectionId === c.id ? chipOn : chipOff)}
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                      {!naming && (
+                        <button type="button" onClick={() => setNaming(true)} className={cn(chipClass, "border-dashed", chipOff)}>
+                          <Plus className="mr-1 inline size-3.5" />
+                          New
+                        </button>
+                      )}
+                    </div>
+                    {naming && (
+                      <div className="flex gap-2">
+                        <Input
+                          autoFocus
+                          value={newName}
+                          onChange={(e) => setNewName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void makeCollection();
+                            }
+                          }}
+                          placeholder="Collection name"
+                          aria-label="New collection name"
+                          maxLength={60}
+                          enterKeyHint="done"
+                          className="bg-background"
+                        />
+                        <Button type="button" variant="outline" disabled={busy || !newName.trim()} onClick={() => void makeCollection()}>
+                          Create
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {!preview?.trackedProductId && (
+        <Button type="button" className="h-12 gap-2 text-base md:self-end md:px-6" disabled={!preview || busy} onClick={() => void track()}>
+          {busy ? <Loader2 className="size-[1.125rem] animate-spin" /> : <Plus className="size-[1.125rem]" />}
+          Track price
+        </Button>
+      )}
+    </div>
   );
 }

@@ -70,7 +70,10 @@ function createController(el: HTMLElement, latest: { current: Options }): Contro
   el.dataset.sheetMaxHeight ??= computed.maxHeight;
   el.style.bottom = `-${SHEET_EXTENSION}px`;
   el.style.paddingBottom = `calc(${el.dataset.sheetPadding} + ${SHEET_EXTENSION}px)`;
-  if (el.dataset.sheetMaxHeight !== "none") el.style.maxHeight = `calc(${el.dataset.sheetMaxHeight} + ${SHEET_EXTENSION}px)`;
+  // --vv-max (set while a keyboard is open) keeps the sheet inside the part of the screen still visible.
+  if (el.dataset.sheetMaxHeight !== "none") {
+    el.style.maxHeight = `calc(min(${el.dataset.sheetMaxHeight}, var(--vv-max, ${el.dataset.sheetMaxHeight})) + ${SHEET_EXTENSION}px)`;
+  }
   // The dialog's duration-200 / duration-300 classes make every property transition (the
   // default transition-property is `all`). Left on, each per-frame transform write would be
   // smoothed by a hidden CSS transition, so the sheet would lag the finger and keep sliding
