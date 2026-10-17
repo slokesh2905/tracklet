@@ -111,7 +111,7 @@ export default function Dashboard({ products, stats, collections }: Props) {
   return (
     <div className="flex flex-col gap-6">
       <section className="rounded-2xl border bg-linear-to-br from-primary/10 via-card to-card p-4 sm:p-6">
-        <h1 className="text-lg font-semibold tracking-tight sm:text-xl">Track a new product</h1>
+        <h1 className="text-lg font-semibold sm:text-xl">Track a new product</h1>
         <p className="mb-4 text-sm text-muted-foreground">
           Paste a link from Amazon, Flipkart, Best Buy or almost any store.
         </p>
@@ -150,7 +150,7 @@ export default function Dashboard({ products, stats, collections }: Props) {
                 <Button variant="outline" size="icon" className="relative shrink-0 md:hidden" aria-label="Sort and filter">
                   <SlidersHorizontal className="size-4" />
                   {activeExtras > 0 && (
-                    <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+                    <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-[0.625rem] font-semibold tracking-caption text-primary-foreground">
                       {activeExtras}
                     </span>
                   )}
@@ -172,7 +172,7 @@ export default function Dashboard({ products, stats, collections }: Props) {
           </div>
 
           {/* Scrolls sideways on narrow screens instead of wrapping into a tall block. */}
-          <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:px-0" role="tablist" aria-label="Filter products">
+          <div className="no-scrollbar fade-x -mx-4 flex gap-2 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:mask-none md:px-0" role="tablist" aria-label="Filter products">
             {FILTERS.map((f) => {
               const active = filter === f.value;
               return (
@@ -183,7 +183,7 @@ export default function Dashboard({ products, stats, collections }: Props) {
                   type="button"
                   onClick={() => setFilter(f.value)}
                   className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors pointer-coarse:h-10 pointer-coarse:px-4",
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium pointer-coarse:h-10 pointer-coarse:px-4",
                     active ? "border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
                   )}
                 >

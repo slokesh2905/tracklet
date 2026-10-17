@@ -13,6 +13,7 @@ import {
   Target,
 } from "lucide-react";
 import AddProductForm from "@/components/AddProductForm";
+import GlassNav from "@/components/GlassNav";
 import DemoCard from "@/components/landing/DemoCard";
 import SignInButton from "@/components/landing/SignInButton";
 import { Logo } from "@/components/Logo";
@@ -49,18 +50,16 @@ export default async function Home() {
   if (await getUser()) redirect("/dashboard");
 
   return (
-    <div className="min-h-dvh">
-      <header className="sticky top-0 z-40 border-b bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:h-16">
-          <Logo />
-          <div className="flex items-center gap-1">
-            <ThemeToggle />
-            <Suspense>
-              <SignInButton autoOpen />
-            </Suspense>
-          </div>
+    <div className="ambient min-h-dvh">
+      <GlassNav className="justify-between sm:h-16">
+        <Logo />
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <Suspense>
+            <SignInButton autoOpen />
+          </Suspense>
         </div>
-      </header>
+      </GlassNav>
 
       <main>
         <section className="relative overflow-hidden">
@@ -70,7 +69,7 @@ export default async function Home() {
               <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
                 <Sparkles className="size-3.5 text-primary" /> Now with AI buy-or-wait verdicts
               </span>
-              <h1 className="mt-5 text-4xl leading-[1.05] font-bold tracking-tight text-balance sm:text-5xl lg:text-6xl">
+              <h1 className="mt-5 text-4xl font-bold text-balance sm:text-5xl lg:text-6xl">
                 Buy at the <span className="text-primary">right price</span>, every time.
               </h1>
               <p className="mt-5 max-w-lg text-base text-pretty text-muted-foreground sm:text-lg">
@@ -88,7 +87,7 @@ export default async function Home() {
 
         <section className="border-y bg-muted/40">
           <div className="mx-auto max-w-6xl px-4 py-16 sm:py-20">
-            <h2 className="text-center text-2xl font-bold tracking-tight sm:text-3xl">How it works</h2>
+            <h2 className="text-center text-2xl font-bold sm:text-3xl">How it works</h2>
             <ol className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
               {STEPS.map(({ icon: Icon, title, body }, i) => (
                 <li key={title} className="flex flex-col items-center text-center">
@@ -107,7 +106,7 @@ export default async function Home() {
         </section>
 
         <section className="mx-auto max-w-6xl px-4 py-16 sm:py-24">
-          <h2 className="text-center text-2xl font-bold tracking-tight sm:text-3xl">Everything you need to stop overpaying</h2>
+          <h2 className="text-center text-2xl font-bold sm:text-3xl">Everything you need to stop overpaying</h2>
           <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map(({ icon: Icon, title, body }) => (
               <div key={title} className="rounded-xl border bg-card p-5">
@@ -122,7 +121,7 @@ export default async function Home() {
         <section className="mx-auto max-w-6xl px-4 pb-20">
           <div className="flex flex-col items-center rounded-3xl bg-primary px-6 py-12 text-center text-primary-foreground sm:py-16">
             <Share2 className="size-8" />
-            <h2 className="mt-4 text-2xl font-bold tracking-tight text-balance sm:text-3xl">Your next purchase is probably cheaper next week.</h2>
+            <h2 className="mt-4 text-2xl font-bold text-balance sm:text-3xl">Your next purchase is probably cheaper next week.</h2>
             <p className="mt-2 max-w-md text-primary-foreground/80">Start tracking in under ten seconds.</p>
             <div className="mt-6 [&_button]:bg-background [&_button]:text-foreground [&_button:hover]:bg-background/90">
               <Suspense>

@@ -4,6 +4,7 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
+import { useSheetMotion } from "@/lib/use-sheet-motion"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
@@ -48,18 +49,35 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  onEscapeKeyDown,
+  onPointerDownOutside,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
+  const closeRef = React.useRef<HTMLButtonElement>(null)
+  // A bottom sheet is spring-driven; Escape, a backdrop tap and the close button run that same
+  // spring (so they can be interrupted too) and only then really close.
+  const { ref: sheetRef, dismiss, isSheet } = useSheetMotion({
+    enabled: () => side === "bottom",
+    onClosed: () => closeRef.current?.click(),
+  })
+  const animateAway = (event: { defaultPrevented: boolean; preventDefault: () => void }) => {
+    if (event.defaultPrevented || !isSheet()) return
+    event.preventDefault()
+    dismiss()
+  }
+
   return (
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content
+        ref={sheetRef}
         data-slot="sheet-content"
         className={cn(
-          "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:duration-500",
+          // Same spring both ways, so it leaves along the path it came in on.
+          "fixed z-50 flex flex-col gap-4 glass glass-thick shadow-2xl data-[state=closed]:animate-out data-[state=open]:animate-in",
           side === "right" &&
             "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
           side === "left" &&
@@ -71,10 +89,22 @@ function SheetContent({
           className
         )}
         {...props}
+        onEscapeKeyDown={(event) => {
+          onEscapeKeyDown?.(event)
+          animateAway(event)
+        }}
+        onPointerDownOutside={(event) => {
+          onPointerDownOutside?.(event)
+          animateAway(event)
+        }}
       >
+        {side === "bottom" && (
+          <div aria-hidden className="absolute top-2 left-1/2 h-1 w-9 -translate-x-1/2 rounded-full bg-muted-foreground/30" />
+        )}
         {children}
+        <SheetPrimitive.Close ref={closeRef} hidden tabIndex={-1} aria-hidden />
         {showCloseButton && (
-          <SheetPrimitive.Close className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-secondary">
+          <SheetPrimitive.Close onClick={animateAway} className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-secondary">
             <XIcon className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>

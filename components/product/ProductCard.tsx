@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   BellRing,
@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { deleteProduct, moveToCollection } from "@/app/actions/products";
-import ConfirmDialog from "@/components/ConfirmDialog";
 import AlertRulesForm from "@/components/product/AlertRulesForm";
 import { AllTimeLowBadge, ChangeBadge, DealBadge, VerdictBadge } from "@/components/product/Badges";
 import Sparkline from "@/components/product/Sparkline";
@@ -39,6 +38,7 @@ import type { DashboardProduct } from "@/lib/data";
 import type { CollectionRow } from "@/lib/db/schema";
 import { formatPercent, formatPrice, hostname, percentChange, timeAgo } from "@/lib/format";
 import { retailerName } from "@/lib/retailers";
+import { deleteWithUndo } from "@/lib/undo";
 
 type Props = {
   product: DashboardProduct;
@@ -47,10 +47,9 @@ type Props = {
 
 export default function ProductCard({ product, collections }: Props) {
   const [alertOpen, setAlertOpen] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [removed, setRemoved] = useState(false);
-
-  if (removed) return null;
+  const [collectionId, setOptimisticCollection] = useOptimistic(product.collection_id ?? "none");
+  const [, startTransition] = useTransition();
 
   const hasRule = product.target_price !== null || product.alert_pct !== null;
   const discount =
@@ -58,14 +57,27 @@ export default function ProductCard({ product, collections }: Props) {
       ? percentChange(product.original_price, product.current_price)
       : null;
 
-  async function move(collectionId: string) {
-    const result = await moveToCollection(product.id, collectionId === "none" ? null : collectionId);
-    if (result.ok) toast.success(result.message);
-    else toast.error(result.error);
+  // Tick the new collection now; useOptimistic falls back to the server value if the move fails.
+  function move(next: string) {
+    startTransition(async () => {
+      setOptimisticCollection(next);
+      const result = await moveToCollection(product.id, next === "none" ? null : next);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.error);
+    });
+  }
+
+  function stopTracking() {
+    setRemoved(true);
+    deleteWithUndo({
+      message: "Stopped tracking",
+      commit: () => deleteProduct(product.id),
+      restore: () => setRemoved(false),
+    });
   }
 
   return (
-    <article className="group relative flex flex-col rounded-xl border bg-card p-3 shadow-xs transition-shadow hover:shadow-md sm:p-4">
+    <article hidden={removed} className="group relative flex flex-col rounded-xl border bg-card p-3 shadow-xs transition-[box-shadow,scale,opacity] hover:shadow-md sm:p-4">
       <div className="flex gap-3">
         <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white sm:size-20">
           {product.image_url ? (
@@ -81,6 +93,7 @@ export default function ProductCard({ product, collections }: Props) {
           <div className="flex items-start gap-1">
             <Link
               href={`/products/${product.id}`}
+              data-press-delegate="article"
               className="line-clamp-2 flex-1 text-sm leading-snug font-medium after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none sm:text-[15px]"
             >
               {product.name}
@@ -102,7 +115,7 @@ export default function ProductCard({ product, collections }: Props) {
                       <FolderInput className="mr-2 size-4 text-muted-foreground" /> Collection
                     </DropdownMenuSubTrigger>
                     <DropdownMenuSubContent>
-                      <DropdownMenuRadioGroup value={product.collection_id ?? "none"} onValueChange={move}>
+                      <DropdownMenuRadioGroup value={collectionId} onValueChange={move}>
                         <DropdownMenuRadioItem value="none">None</DropdownMenuRadioItem>
                         {collections.map((c) => (
                           <DropdownMenuRadioItem key={c.id} value={c.id}>
@@ -119,7 +132,7 @@ export default function ProductCard({ product, collections }: Props) {
                   </a>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={() => setConfirmOpen(true)}>
+                <DropdownMenuItem variant="destructive" onSelect={stopTracking}>
                   <Trash2 /> Stop tracking
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -134,7 +147,7 @@ export default function ProductCard({ product, collections }: Props) {
           </p>
 
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2">
-            <span className="text-xl font-bold tracking-tight">
+            <span className="text-xl font-bold">
               {formatPrice(product.current_price, product.currency)}
             </span>
             {discount !== null && (
@@ -201,24 +214,6 @@ export default function ProductCard({ product, collections }: Props) {
           />
         </DialogContent>
       </Dialog>
-
-      <ConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title="Stop tracking this product?"
-        description="Its price history and alerts will be deleted. This can't be undone."
-        confirmLabel="Stop tracking"
-        destructive
-        onConfirm={async () => {
-          const result = await deleteProduct(product.id);
-          if (result.ok) {
-            setRemoved(true);
-            toast.success(result.message);
-          } else {
-            toast.error(result.error);
-          }
-        }}
-      />
     </article>
   );
 }

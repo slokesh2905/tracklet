@@ -6,6 +6,12 @@ import { XIcon } from "lucide-react"
 import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
+import { useSheetMotion } from "@/lib/use-sheet-motion"
+import { useTransformOriginFromPress } from "@/lib/use-press-origin"
+
+/** Below Tailwind's `sm`, dialogs are bottom sheets that can be swiped away. */
+const isSheetLayout = () => window.matchMedia("(width < 40rem)").matches
+const isModalLayout = () => !isSheetLayout()
 
 function Dialog({
   ...props
@@ -51,26 +57,61 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onEscapeKeyDown,
+  onPointerDownOutside,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  const closeRef = React.useRef<HTMLButtonElement>(null)
+  // On phones the dialog is a spring-driven sheet. Escape, a backdrop tap and the close button
+  // run that same spring (so they can be interrupted too) and only then really close.
+  const { ref: sheetRef, dismiss, isSheet } = useSheetMotion({
+    enabled: isSheetLayout,
+    onClosed: () => closeRef.current?.click(),
+  })
+  const originRef = useTransformOriginFromPress(isModalLayout)
+  const contentRef = React.useCallback(
+    (el: HTMLDivElement | null) => {
+      originRef(el)
+      return sheetRef(el)
+    },
+    [originRef, sheetRef]
+  )
+  const animateAway = (event: { defaultPrevented: boolean; preventDefault: () => void }) => {
+    if (event.defaultPrevented || !isSheet()) return
+    event.preventDefault()
+    dismiss()
+  }
+
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
       <DialogPrimitive.Content
+        ref={contentRef}
         data-slot="dialog-content"
         className={cn(
           // Mobile: a bottom sheet that respects the home-indicator safe area. sm+: centred modal.
-          "fixed inset-x-0 bottom-0 z-50 grid max-h-[90dvh] w-full gap-4 overflow-y-auto rounded-t-2xl border bg-background p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom sm:inset-x-auto sm:top-[50%] sm:bottom-auto sm:left-[50%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:pb-6 sm:data-[state=closed]:slide-out-to-bottom-0 sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=open]:zoom-in-95",
+          "fixed inset-x-0 bottom-0 z-50 grid max-h-[90dvh] w-full gap-4 overflow-y-auto rounded-t-2xl border border-glass-edge glass glass-thick p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-2xl outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom sm:inset-x-auto sm:top-[50%] sm:bottom-auto sm:left-[50%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:pb-6 sm:data-[state=closed]:slide-out-to-bottom-0 sm:data-[state=closed]:zoom-out-90 sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=open]:zoom-in-90",
           className
         )}
         {...props}
+        onEscapeKeyDown={(event) => {
+          onEscapeKeyDown?.(event)
+          animateAway(event)
+        }}
+        onPointerDownOutside={(event) => {
+          onPointerDownOutside?.(event)
+          animateAway(event)
+        }}
       >
+        <div aria-hidden className="absolute top-2 left-1/2 h-1 w-9 -translate-x-1/2 rounded-full bg-muted-foreground/30 sm:hidden" />
         {children}
+        <DialogPrimitive.Close ref={closeRef} hidden tabIndex={-1} aria-hidden />
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
+            onClick={animateAway}
             className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <XIcon />

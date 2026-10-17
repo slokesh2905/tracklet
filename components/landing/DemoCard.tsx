@@ -10,12 +10,12 @@ export default function DemoCard({ history }: { history: ChartPoint[] }) {
   return (
     <div className="relative mx-auto w-full max-w-xl">
       <div className="absolute -inset-4 -z-10 rounded-[2rem] bg-linear-to-tr from-primary/25 via-primary/5 to-transparent blur-2xl" aria-hidden="true" />
-      <div className="rounded-2xl border bg-card p-4 shadow-xl sm:p-5">
+      <div className="rounded-2xl border border-glass-edge glass glass-thin p-4 shadow-xl sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground">amazon.in · Headphones</p>
             <p className="truncate font-semibold">Sony WH-1000XM5 Wireless Headphones</p>
-            <p className="mt-1 text-2xl font-bold tracking-tight">{formatPrice(current, "INR")}</p>
+            <p className="mt-1 text-2xl font-bold">{formatPrice(current, "INR")}</p>
           </div>
           <span className="flex shrink-0 items-center gap-1 rounded-full bg-success/12 px-2.5 py-1 text-xs font-semibold text-success">
             <BellRing className="size-3" /> Target hit

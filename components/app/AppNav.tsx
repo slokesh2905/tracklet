@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, FolderHeart, LayoutGrid, LogOut, Settings } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
+import GlassNav from "@/components/GlassNav";
 import { Logo } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutGrid },
+  { href: "/dashboard", label: "Products", icon: LayoutGrid },
   { href: "/collections", label: "Collections", icon: FolderHeart },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -37,7 +38,7 @@ function UnreadDot({ count, className }: { count: number; className?: string }) 
   return (
     <span
       className={cn(
-        "flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums",
+        "flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-semibold tracking-caption text-primary-foreground tabular-nums",
         className
       )}
       aria-label={`${count} unread`}
@@ -52,8 +53,7 @@ export function AppHeader({ email, unreadAlerts }: { email: string; unreadAlerts
   const initial = email.charAt(0).toUpperCase() || "?";
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/85 pt-[env(safe-area-inset-top)] backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4 sm:h-16">
+    <GlassNav className="gap-4 sm:h-16">
         <Logo href="/dashboard" />
 
         <nav className="ml-4 hidden items-center gap-1 md:flex" aria-label="Main">
@@ -63,8 +63,8 @@ export function AppHeader({ email, unreadAlerts }: { email: string; unreadAlerts
               href={href}
               aria-current={isActive(href) ? "page" : undefined}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                isActive(href) ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"
+                "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium",
+                isActive(href) ? "bg-foreground/[0.08] text-foreground" : "text-foreground/65 hover:bg-foreground/[0.05] hover:text-foreground"
               )}
             >
               {label}
@@ -97,8 +97,7 @@ export function AppHeader({ email, unreadAlerts }: { email: string; unreadAlerts
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </div>
-    </header>
+    </GlassNav>
   );
 }
 
@@ -107,7 +106,7 @@ export function MobileTabBar({ unreadAlerts }: { unreadAlerts: number }) {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pb-safe backdrop-blur-md md:hidden"
+      className="glass fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] z-40 rounded-3xl border border-glass-edge p-1 shadow-lg shadow-black/10 md:hidden"
       aria-label="Main"
     >
       <ul className="grid grid-cols-4">
@@ -119,8 +118,8 @@ export function MobileTabBar({ unreadAlerts }: { unreadAlerts: number }) {
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors",
-                  active ? "text-primary" : "text-muted-foreground"
+                  "flex h-14 flex-col items-center justify-center gap-1 rounded-2xl text-[0.6875rem] font-medium tracking-caption",
+                  active ? "bg-foreground/[0.08] text-primary" : "text-foreground/65"
                 )}
               >
                 <span className="relative">

@@ -22,7 +22,7 @@ export function Logo({ href = "/", className }: { href?: string; className?: str
   return (
     <Link
       href={href}
-      className={cn("flex items-center gap-2 rounded-md font-semibold tracking-tight focus-visible:outline-2", className)}
+      className={cn("flex items-center gap-2 rounded-md font-semibold focus-visible:outline-2", className)}
       aria-label="Tracklet home"
     >
       <LogoMark className="size-7" />

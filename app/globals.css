@@ -1,13 +1,50 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./springs.css";
 
 @custom-variant dark (&:is(.dark *));
+
+@theme {
+  /* Every `transition-*` utility is a critically damped spring (see springs.css). */
+  --default-transition-duration: var(--spring-fast-duration);
+  --default-transition-timing-function: var(--spring-fast);
+
+  /*
+   * Optical type scale. Tracking tightens and leading closes up as type grows (and opens
+   * slightly below body size), so `text-4xl sm:text-5xl` re-tunes both at each breakpoint.
+   * Body copy (sm/base) sits at 0 tracking with comfortable leading.
+   */
+  --text-xs--line-height: 1.4;
+  --text-xs--letter-spacing: 0.01em;
+  --text-sm--line-height: 1.45;
+  --text-sm--letter-spacing: 0;
+  --text-base--line-height: 1.5;
+  --text-base--letter-spacing: 0;
+  --text-lg--line-height: 1.4;
+  --text-lg--letter-spacing: -0.005em;
+  --text-xl--line-height: 1.3;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl--line-height: 1.25;
+  --text-2xl--letter-spacing: -0.015em;
+  --text-3xl--line-height: 1.2;
+  --text-3xl--letter-spacing: -0.02em;
+  --text-4xl--line-height: 1.12;
+  --text-4xl--letter-spacing: -0.025em;
+  --text-5xl--line-height: 1.07;
+  --text-5xl--letter-spacing: -0.03em;
+  --text-6xl--line-height: 1.04;
+  --text-6xl--letter-spacing: -0.035em;
+
+  /* For hand-sized text under 12px, which sits outside the scale. */
+  --tracking-caption: 0.01em;
+}
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-glass-edge: var(--glass-edge);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -80,6 +117,8 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --glass-edge: oklch(0 0 0 / 9%);
+  --glass-sheen: oklch(1 0 0 / 55%);
 }
 
 .dark {
@@ -116,6 +155,8 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --glass-edge: oklch(1 0 0 / 14%);
+  --glass-sheen: oklch(1 0 0 / 10%);
 }
 
 @layer base {
@@ -128,6 +169,310 @@
   }
   html {
     scroll-padding-top: 5rem;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    line-height: 1.25;
+    letter-spacing: -0.005em;
+  }
+}
+
+/*
+ * Press feedback (set by components/PressFeedback.tsx on pointer-DOWN, never on release).
+ * Every button, link and card scales to 0.97 the instant it is touched, then springs back.
+ * Pressing in uses the quick `press` spring so it reads as direct; letting go uses `fast`.
+ *   scale      default; --press-scale overrides per element
+ *   fade       inline links (a transform has no effect on inline text)
+ *   highlight  list rows, which tint instead of shrinking
+ */
+:where(a[href], button, [role="button"], [role="tab"], [role="switch"], [role="checkbox"], summary, [data-press]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [data-press="off"],
+    [role^="menuitem"],
+    [role="option"]
+  ) {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, scale;
+  transition-duration: var(--spring-fast-duration);
+  transition-timing-function: var(--spring-fast);
+}
+
+[data-pressed="scale"] {
+  scale: var(--press-scale, 0.97);
+}
+[data-pressed="fade"] {
+  opacity: 0.6;
+}
+[data-pressed="highlight"] {
+  background-color: var(--accent);
+}
+[data-pressed] {
+  transition-duration: var(--spring-press-duration);
+  transition-timing-function: var(--spring-press);
+}
+
+/* Until the listener has mounted (first paint, no JS), fall back to :active. */
+html:not([data-press-ready]) :where(a[href], button, [role="button"], [role="tab"], [role="switch"]):not(:disabled):active {
+  scale: var(--press-scale, 0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Reduced motion keeps the feedback but swaps the scale for a dim. */
+  [data-pressed="scale"] {
+    scale: none;
+    opacity: 0.7;
+  }
+  html:not([data-press-ready]) :where(a[href], button, [role="button"], [role="tab"], [role="switch"]):not(:disabled):active {
+    scale: none;
+    opacity: 0.7;
+  }
+}
+
+/*
+ * Glass: ONE translucent material for floating chrome (bars, sheets, menus, toasts).
+ * Content scrolls underneath and blurs; hierarchy comes from thickness, not extra layers:
+ *   glass        bars          (default)
+ *   glass-thin   menus, toasts, small floating chips
+ *   glass-thick  sheets and dialogs: heavier blur, more opaque so forms stay legible
+ * Never stack one glass surface on another. Colour belongs on solid layers inside it.
+ */
+@utility glass {
+  background-color: color-mix(in oklab, var(--glass-tint, var(--background)) var(--glass-alpha, 52%), transparent);
+  /* Light catching the top of the pane. */
+  background-image: linear-gradient(180deg, var(--glass-sheen), transparent 65%);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 200%));
+  backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 200%));
+
+  /* Frostier, never see-through, when the user asks for less transparency or more contrast. */
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--glass-tint, var(--background));
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (prefers-contrast: more) {
+    background-color: var(--glass-tint, var(--background));
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (forced-colors: active) {
+    background-color: Canvas;
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-color: CanvasText;
+  }
+  @supports not (backdrop-filter: blur(1px)) {
+    background-color: var(--glass-tint, var(--background));
+    background-image: none;
+  }
+}
+
+@utility glass-thin {
+  --glass-tint: var(--popover);
+  --glass-alpha: 66%;
+  --glass-blur: 20px;
+}
+
+@utility glass-thick {
+  --glass-alpha: 80%;
+  --glass-blur: 40px;
+  --glass-saturate: 170%;
+}
+
+/* Horizontal scrollers dissolve at the edge instead of being cut off mid-chip. */
+@utility ambient {
+  background-image:
+    radial-gradient(60rem 38rem at 12% -8%, color-mix(in oklab, var(--primary) 16%, transparent), transparent 70%),
+    radial-gradient(48rem 34rem at 100% 8%, color-mix(in oklab, var(--chart-2) 12%, transparent), transparent 70%),
+    radial-gradient(44rem 30rem at 50% 110%, color-mix(in oklab, var(--primary) 9%, transparent), transparent 70%);
+  background-attachment: fixed;
+}
+
+@utility fade-x {
+  mask-image: linear-gradient(to right, transparent, #000 1rem, #000 calc(100% - 1.5rem), transparent);
+}
+
+/* Theme switch cross-fades (View Transitions) instead of flipping brightness in one frame. */
+::view-transition-group(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--spring-base-duration);
+  animation-timing-function: var(--spring-base);
+}
+
+/* A modal task pushes the page back, the way a stacked sheet does on iOS (phones only). */
+@media (width < 40rem) and (prefers-reduced-motion: no-preference) {
+  main {
+    transition: scale var(--spring-base-duration) var(--spring-base);
+    transform-origin: top center;
+  }
+  body:has([data-slot="dialog-content"][data-state="open"], [data-slot="sheet-content"][data-state="open"]) main {
+    scale: 0.96;
+  }
+}
+
+/*
+ * ───────────── Accessibility variants ─────────────
+ * Every animation and every glass surface has a quieter version for each preference.
+ * Unlayered on purpose: unlayered rules beat Tailwind's layers, so these win without !important.
+ *
+ *   reduced motion        slides / zooms / springs / spins  ->  short cross-fades, static or opacity-only
+ *   reduced transparency  glass, scrims, toasts             ->  frosted: opaque, no blur
+ *   increased contrast    glass, scrims, brand colours      ->  solid, defined edges, darker/lighter inks
+ *   forced colors         Windows high contrast             ->  system colours, no effects
+ */
+
+/*
+ * Springs everywhere. tw-animate's enter/exit (menus, selects, tooltips, dialogs, sheets, scrims)
+ * would otherwise run 150ms of `ease`; Tailwind's pulse is 2s of cubic-bezier; Sonner bakes in
+ * 0.2-0.5s of ease. All three now use the same springs as the rest of the app.
+ * (Continuous spinners rotate at constant speed: that is not an ease, so it stays `linear`.)
+ */
+[class*="animate-in"] {
+  --tw-animation-duration: var(--spring-base-duration);
+  --tw-ease: var(--spring-base);
+}
+/* Leaving is quicker than arriving: Radix keeps the overlay mounted (and click-blocking) until the
+   exit finishes, so a dismissal must not hold the page hostage for the whole of a slow spring. */
+[data-state="closed"][class*="animate-out"] {
+  --tw-animation-duration: var(--spring-fast-duration);
+  --tw-ease: var(--spring-fast);
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.5;
+  }
+}
+.animate-pulse {
+  animation: breathe 2s infinite;
+  animation-timing-function: var(--spring-base);
+}
+
+[data-sonner-toast],
+[data-sonner-toast] > * {
+  transition-duration: var(--spring-base-duration) !important;
+  transition-timing-function: var(--spring-base) !important;
+}
+
+/* A bottom sheet that mounted under spring control opens by spring, not by the keyframe slide. */
+[data-sheet="driven"][data-state="open"] {
+  animation: none;
+}
+/* A sheet that has already sprung off screen has nothing left to animate: unmount it now. */
+[data-sheet-exited][data-state="closed"] {
+  animation: none;
+}
+
+@keyframes soft-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Enter/exit animations (sheets, dialogs, menus, selects, tooltips): fade only, and shorter. */
+  *,
+  ::before,
+  ::after {
+    --tw-enter-translate-x: 0;
+    --tw-enter-translate-y: 0;
+    --tw-exit-translate-x: 0;
+    --tw-exit-translate-y: 0;
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
+    --tw-enter-rotate: 0;
+    --tw-exit-rotate: 0;
+  }
+  [class*="animate-in"],
+  [class*="animate-out"] {
+    --tw-animation-duration: var(--spring-fast-duration);
+    --tw-ease: var(--spring-fast);
+  }
+
+  /* Spinners stop rotating and breathe instead; skeletons hold still. */
+  .animate-spin {
+    animation: soft-pulse 1.6s infinite;
+    animation-timing-function: var(--spring-base);
+  }
+  .animate-pulse {
+    animation: none;
+  }
+
+  /* Things that slide to a new value just change. */
+  [data-slot="switch-thumb"],
+  [data-slot="progress-indicator"] {
+    transition: none;
+  }
+
+  /* Page tint stays put instead of sliding under scrolling content; theme change is a short fade. */
+  .ambient {
+    background-attachment: scroll;
+  }
+  ::view-transition-group(root),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: var(--spring-fast-duration);
+    animation-timing-function: var(--spring-fast);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  /* Scrims dim harder instead of letting the page show through; toasts lose their blur. */
+  [data-slot="dialog-overlay"],
+  [data-slot="sheet-overlay"] {
+    background-color: oklch(0 0 0 / 80%);
+  }
+  [data-sonner-toaster] {
+    --normal-bg: var(--popover) !important;
+  }
+  [data-sonner-toast] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --border: oklch(0.55 0 0);
+    --input: oklch(0.55 0 0);
+    --muted-foreground: oklch(0.4 0 0);
+    --glass-edge: oklch(0 0 0 / 75%);
+    /* Brand inks that fall short of 4.5:1 on white get darker. */
+    --primary: oklch(0.5 0.2 41);
+    --success: oklch(0.4 0.14 150);
+    --danger: oklch(0.46 0.22 27);
+    --destructive: oklch(0.46 0.22 27);
+    --chart-2: oklch(0.42 0.11 184);
+  }
+  .dark {
+    --border: oklch(1 0 0 / 45%);
+    --input: oklch(1 0 0 / 50%);
+    --muted-foreground: oklch(0.85 0 0);
+    --glass-edge: oklch(1 0 0 / 80%);
+    --primary: oklch(0.8 0.17 50);
+    --success: oklch(0.85 0.17 160);
+    --danger: oklch(0.8 0.17 22);
+    --destructive: oklch(0.8 0.17 22);
+    --chart-2: oklch(0.82 0.15 165);
+  }
+  /* Colour wash behind text lowers contrast; drop it. */
+  .ambient {
+    background-image: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .ambient {
+    background-image: none;
+  }
+  [data-slot="dialog-overlay"],
+  [data-slot="sheet-overlay"] {
+    background-color: transparent;
   }
 }
 

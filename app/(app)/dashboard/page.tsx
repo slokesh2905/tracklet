@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Dashboard from "@/components/app/Dashboard";
 import { getDashboardData } from "@/lib/data";
 
-export const metadata = { title: "Dashboard" };
+export const metadata = { title: "Products" };
 
 export default async function DashboardPage() {
   const data = await getDashboardData();

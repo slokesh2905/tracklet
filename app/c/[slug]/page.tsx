@@ -28,7 +28,7 @@ export default async function SharedCollectionPage({ params }: Params) {
 
   return (
     <PublicShell>
-      <h1 className="text-2xl font-bold tracking-tight">{collection.name}</h1>
+      <h1 className="text-2xl font-bold">{collection.name}</h1>
       <p className="text-sm text-muted-foreground">
         A shared wishlist · {collection.products.length} product{collection.products.length === 1 ? "" : "s"}, prices checked daily
       </p>
@@ -38,7 +38,7 @@ export default async function SharedCollectionPage({ params }: Params) {
           const atLow = p.lowest_price !== null && p.highest_price !== null && Number(p.highest_price) > Number(p.lowest_price) && current <= Number(p.lowest_price);
           return (
             <li key={p.share_slug} className="border-b last:border-b-0">
-              <Link href={`/p/${p.share_slug}`} className="flex items-center gap-3 p-3 hover:bg-accent/50 sm:p-4">
+              <Link href={`/p/${p.share_slug}`} data-press="highlight" className="flex items-center gap-3 p-3 hover:bg-accent/50 sm:p-4">
                 <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white">
                   {p.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element

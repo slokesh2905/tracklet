@@ -55,8 +55,8 @@ export default async function SharedProductPage({ params }: Params) {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-xs text-muted-foreground">{hostname(product.url)} · shared price history</p>
-            <h1 className="mt-1 text-lg leading-snug font-semibold tracking-tight sm:text-xl">{product.name}</h1>
-            <p className="mt-2 text-3xl font-bold tracking-tight">{formatPrice(current, product.currency)}</p>
+            <h1 className="mt-1 text-lg font-semibold sm:text-xl">{product.name}</h1>
+            <p className="mt-2 text-3xl font-bold">{formatPrice(current, product.currency)}</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {!product.in_stock && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-danger/12 px-2 py-0.5 text-xs font-medium text-danger">

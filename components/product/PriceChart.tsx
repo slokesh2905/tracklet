@@ -139,6 +139,7 @@ export default function PriceChart({
               width={44}
             />
             <Tooltip
+              isAnimationActive={false}
               cursor={{ stroke: "var(--color-muted-foreground)", strokeDasharray: "3 3" }}
               content={({ active, payload }) => {
                 const point = payload?.[0]?.payload as { t: number; price: number } | undefined;

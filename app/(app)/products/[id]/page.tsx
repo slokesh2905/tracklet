@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, ImageOff, PackageX } from "lucide-react";
 import AiVerdictCard from "@/components/product/AiVerdictCard";
+import AlertKindIcon from "@/components/product/AlertKindIcon";
 import OtherStores from "@/components/product/OtherStores";
 import AlertRulesForm from "@/components/product/AlertRulesForm";
 import { AllTimeLowBadge, DealBadge } from "@/components/product/Badges";
@@ -83,9 +84,9 @@ export default async function ProductPage({ params }: Params) {
             {hostname(product.url)}
             {product.category && ` · ${product.category}`}
           </p>
-          <h1 className="mt-1 text-lg leading-snug font-semibold tracking-tight sm:text-xl">{product.name}</h1>
+          <h1 className="mt-1 text-lg font-semibold sm:text-xl">{product.name}</h1>
           <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-3xl font-bold tracking-tight">{formatPrice(product.current_price, product.currency)}</span>
+            <span className="text-3xl font-bold">{formatPrice(product.current_price, product.currency)}</span>
             {discount !== null && (
               <span className="text-sm text-muted-foreground">
                 <s>{formatPrice(Number(product.original_price), product.currency)}</s>{" "}
@@ -167,8 +168,9 @@ export default async function ProductPage({ params }: Params) {
               <ul className="flex flex-col divide-y text-sm">
                 {alerts.map((a) => (
                   <li key={a.id} className="flex items-center justify-between gap-3 py-2">
-                    <span className="truncate">
-                      {ALERT_COPY[a.kind].emoji} {ALERT_COPY[a.kind].title}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <AlertKindIcon kind={a.kind} />
+                      <span className="truncate">{ALERT_COPY[a.kind].title}</span>
                     </span>
                     <span className="shrink-0 text-right text-xs text-muted-foreground" suppressHydrationWarning>
                       {formatPrice(Number(a.new_price), a.currency)} · {timeAgo(a.created_at)}

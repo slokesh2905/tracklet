@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BellOff, ImageOff, Mail, MessageSquare } from "lucide-react";
 import MarkAllRead from "@/components/app/MarkAllRead";
+import AlertKindIcon from "@/components/product/AlertKindIcon";
 import { ALERT_COPY } from "@/lib/alerts";
 import { getAlerts } from "@/lib/data";
 import { formatPercent, formatPrice, percentChange, timeAgo } from "@/lib/format";
@@ -16,7 +17,7 @@ export default async function AlertsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Alerts</h1>
+          <h1 className="text-2xl font-bold">Alerts</h1>
           <p className="text-sm text-muted-foreground">
             {unread > 0 ? `${unread} new` : "Every alert we’ve sent you"}
           </p>
@@ -39,7 +40,7 @@ export default async function AlertsPage() {
             const change = a.old_price ? percentChange(Number(a.old_price), Number(a.new_price)) : 0;
             return (
               <li key={a.id} className={cn("border-b last:border-b-0", !a.read_at && "bg-primary/5")}>
-                <Link href={`/products/${a.product_id}`} className="flex items-center gap-3 p-3 hover:bg-accent/50 sm:p-4">
+                <Link href={`/products/${a.product_id}`} data-press="highlight" className="flex items-center gap-3 p-3 hover:bg-accent/50 sm:p-4">
                   <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white">
                     {a.product?.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -51,7 +52,7 @@ export default async function AlertsPage() {
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-2 text-sm font-medium">
                       {!a.read_at && <span className="size-2 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
-                      {copy.emoji} {copy.title}
+                      <AlertKindIcon kind={a.kind} /> {copy.title}
                     </p>
                     <p className="truncate text-sm text-muted-foreground">{a.product?.name ?? "Deleted product"}</p>
                     <p className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">

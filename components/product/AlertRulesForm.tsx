@@ -68,7 +68,7 @@ export default function AlertRulesForm({
               key={s}
               type="button"
               onClick={() => setTarget(String(s))}
-              className="rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground pointer-coarse:py-2"
+              className="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground pointer-coarse:py-2"
             >
               −{[5, 10, 20][i]}% · {formatPrice(s, currency)}
             </button>

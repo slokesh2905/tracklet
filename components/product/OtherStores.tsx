@@ -49,7 +49,7 @@ export default function OtherStores({
                       {retailerName(o.retailer)}
                       <span
                         className={cn(
-                          "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                          "rounded-full px-1.5 py-0.5 text-[0.625rem] font-medium tracking-caption",
                           o.match === "exact" ? "bg-success/12 text-success" : "bg-muted text-muted-foreground"
                         )}
                       >

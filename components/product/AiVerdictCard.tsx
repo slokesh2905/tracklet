@@ -75,7 +75,7 @@ export default function AiVerdictCard({ productId, verdict, stale, aiEnabled, ga
           <Fact icon={CalendarClock}>A trend-based verdict unlocks around {formatDate(gate.readyOn, { year: false })}</Fact>
         </ul>
         <CompareStoresButton productId={productId} label="Compare other stores now" className="mt-4 w-full gap-2 sm:w-auto" />
-        <p className="mt-3 text-[11px] text-muted-foreground">Comparing checks whether the same item is cheaper elsewhere.</p>
+        <p className="mt-3 text-[0.6875rem] tracking-caption text-muted-foreground">Comparing checks whether the same item is cheaper elsewhere.</p>
       </div>
     );
   }
@@ -130,7 +130,7 @@ export default function AiVerdictCard({ productId, verdict, stale, aiEnabled, ga
           </Button>
         </div>
       )}
-      <p className="mt-3 text-[11px] text-muted-foreground">AI-generated from price data only. Not financial advice.</p>
+      <p className="mt-3 text-[0.6875rem] tracking-caption text-muted-foreground">AI-generated from price data only. Not financial advice.</p>
     </div>
   );
 }

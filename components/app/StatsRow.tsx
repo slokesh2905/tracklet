@@ -22,7 +22,7 @@ function Stat({
         <Icon className={cn("size-4 shrink-0", tone === "success" ? "text-success" : "text-primary")} />
         <span className="truncate">{label}</span>
       </div>
-      <div className={cn("text-xl font-bold tracking-tight sm:text-2xl", tone === "success" && "text-success")}>
+      <div className={cn("text-xl font-bold sm:text-2xl", tone === "success" && "text-success")}>
         {value}
       </div>
       {hint && <p className="truncate text-xs text-muted-foreground">{hint}</p>}

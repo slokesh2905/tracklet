@@ -10,7 +10,6 @@ import {
   renameCollection,
   setCollectionPublic,
 } from "@/app/actions/collections";
-import ConfirmDialog from "@/components/ConfirmDialog";
 import ShareControl from "@/components/ShareControl";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +29,7 @@ import {
 import { Input } from "@/components/ui/input";
 import type { CollectionRow, ProductRow } from "@/lib/db/schema";
 import { formatPrice } from "@/lib/format";
+import { deleteWithUndo } from "@/lib/undo";
 
 type Collection = CollectionRow & {
   products: Array<Pick<ProductRow, "id" | "name" | "image_url" | "current_price" | "currency">>;
@@ -84,11 +84,20 @@ function NameDialog({
 
 function CollectionCard({ collection }: { collection: Collection }) {
   const [renameOpen, setRenameOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [removed, setRemoved] = useState(false);
   const count = collection.products.length;
 
+  function deleteCollectionWithUndo() {
+    setRemoved(true);
+    deleteWithUndo({
+      message: "Collection deleted (products kept)",
+      commit: () => deleteCollection(collection.id),
+      restore: () => setRemoved(false),
+    });
+  }
+
   return (
-    <article className="flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-4">
+    <article hidden={removed} className="flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className="truncate font-semibold">{collection.name}</h2>
@@ -106,7 +115,7 @@ function CollectionCard({ collection }: { collection: Collection }) {
             <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
               <Pencil /> Rename
             </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+            <DropdownMenuItem variant="destructive" onSelect={deleteCollectionWithUndo}>
               <Trash2 /> Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -117,7 +126,7 @@ function CollectionCard({ collection }: { collection: Collection }) {
         <ul className="flex flex-col divide-y">
           {collection.products.slice(0, 4).map((p) => (
             <li key={p.id}>
-              <Link href={`/products/${p.id}`} className="flex items-center gap-3 py-2 hover:opacity-80">
+              <Link href={`/products/${p.id}`} data-press="highlight" className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/50">
                 <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-white">
                   {p.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -158,19 +167,6 @@ function CollectionCard({ collection }: { collection: Collection }) {
           return r.ok;
         }}
       />
-      <ConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        title={`Delete “${collection.name}”?`}
-        description="The products stay tracked. They just leave this collection."
-        confirmLabel="Delete"
-        destructive
-        onConfirm={async () => {
-          const r = await deleteCollection(collection.id);
-          if (r.ok) toast.success(r.message);
-          else toast.error(r.error);
-        }}
-      />
     </article>
   );
 }
@@ -182,7 +178,7 @@ export default function CollectionsView({ collections }: { collections: Collecti
     <div className="flex flex-col gap-6">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Collections</h1>
+          <h1 className="text-2xl font-bold">Collections</h1>
           <p className="text-sm text-muted-foreground">Organise products and share wishlists.</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} className="gap-2">
