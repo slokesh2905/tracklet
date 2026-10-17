@@ -17,6 +17,8 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icons/512", sizes: "512x512", type: "image/png", purpose: "any" },
       { src: "/icons/maskable-512", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
+    // Android Chrome lists the installed app in the share sheet; the link arrives as a GET to /share.
+    share_target: { action: "/share", method: "GET", params: { url: "url", text: "text", title: "title" } },
     shortcuts: [
       { name: "Alerts", url: "/alerts" },
       { name: "Collections", url: "/collections" },

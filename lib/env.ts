@@ -25,6 +25,7 @@ export const env = z
 const serverSchema = z.object({
   CRON_SECRET: z.string().min(16),
   AI_DAILY_LIMIT: z.coerce.number().int().positive().default(20),
+  ADD_DAILY_LIMIT: z.coerce.number().int().positive().default(60),
 });
 
 type ServerEnv = z.infer<typeof serverSchema>;

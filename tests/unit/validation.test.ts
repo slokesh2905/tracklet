@@ -4,6 +4,7 @@ import { toScrapedProduct } from "@/lib/scraper";
 import {
   alertRulesSchema,
   bulkUrlsSchema,
+  newAlertRulesSchema,
   normalizeProductUrl,
   productUrlSchema,
   settingsSchema,
@@ -27,6 +28,32 @@ describe("productUrlSchema", () => {
 
   it("accepts and normalises a product URL", () => {
     expect(productUrlSchema.parse("  https://shop.test/a?gclid=1 ")).toBe("https://shop.test/a");
+  });
+
+  it.each([
+    "http://localhost:3000/x",
+    "http://127.0.0.1/x",
+    "http://2130706433/x",
+    "http://10.0.0.5/x",
+    "http://172.20.1.1/x",
+    "http://192.168.1.10/x",
+    "http://169.254.169.254/latest/meta-data",
+    "http://[::1]/x",
+    "http://printer.local/x",
+  ])("refuses the private address %s", (url) => {
+    expect(productUrlSchema.safeParse(url).success).toBe(false);
+  });
+
+  it.each(["https://172.32.0.1/x", "https://8.8.8.8/x", "https://www.amazon.in/dp/B0ABC"])("allows the public address %s", (url) => {
+    expect(productUrlSchema.safeParse(url).success).toBe(true);
+  });
+});
+
+describe("newAlertRulesSchema", () => {
+  it("takes the rules without a product id", () => {
+    expect(newAlertRulesSchema.parse({ targetPrice: "499", alertPct: "" })).toEqual({ targetPrice: 499, alertPct: null });
+    expect(newAlertRulesSchema.safeParse({ targetPrice: "-1", alertPct: null }).success).toBe(false);
+    expect(newAlertRulesSchema.safeParse({ targetPrice: null, alertPct: 95 }).success).toBe(false);
   });
 });
 

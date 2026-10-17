@@ -18,6 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { CollectionRow } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -118,7 +119,7 @@ export function AppHeader({ email, unreadAlerts }: { email: string; unreadAlerts
   );
 }
 
-export function MobileTabBar({ unreadAlerts }: { unreadAlerts: number }) {
+export function MobileTabBar({ unreadAlerts, collections }: { unreadAlerts: number; collections: Pick<CollectionRow, "id" | "name">[] }) {
   const isActive = useIsActive();
   const pathname = usePathname();
   const [trackOpen, setTrackOpen] = useState(false);
@@ -173,7 +174,7 @@ export function MobileTabBar({ unreadAlerts }: { unreadAlerts: number }) {
           {NAV.slice(2).map(tab)}
         </ul>
       </nav>
-      <TrackSheet open={trackOpen} onOpenChange={setTrackOpen} />
+      <TrackSheet open={trackOpen} onOpenChange={setTrackOpen} collections={collections} />
     </>
   );
 }

@@ -1,10 +1,10 @@
 import { AppHeader, MobileTabBar } from "@/components/app/AppNav";
-import { getUnreadAlertCount } from "@/lib/data";
+import { getCollectionList, getUnreadAlertCount } from "@/lib/data";
 import { requireUser } from "@/lib/session";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const unread = await getUnreadAlertCount();
+  const [unread, collections] = await Promise.all([getUnreadAlertCount(), getCollectionList()]);
 
   return (
     <div className="ambient min-h-dvh bg-muted/30">
@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="mx-auto max-w-6xl px-4 pt-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:pt-6 md:pb-12">
         {children}
       </main>
-      <MobileTabBar unreadAlerts={unread} />
+      <MobileTabBar unreadAlerts={unread} collections={collections} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { aiUsage, collections } from "@/lib/db/schema";
+import { addUsage, aiUsage, collections } from "@/lib/db/schema";
 
 /** True when the collection exists and belongs to the user. */
 export async function ownsCollection(userId: string, collectionId: string) {
@@ -27,4 +27,17 @@ export async function consumeAiQuota(userId: string, dailyLimit: number) {
     })
     .returning({ calls: aiUsage.calls });
   return (row?.calls ?? Infinity) <= dailyLimit;
+}
+
+/** Same atomic counter for pages read when adding products; only real fetches are counted. */
+export async function consumeAddQuota(userId: string, dailyLimit: number) {
+  const [row] = await db
+    .insert(addUsage)
+    .values({ user_id: userId, reads: 1 })
+    .onConflictDoUpdate({
+      target: [addUsage.user_id, addUsage.day],
+      set: { reads: sql`${addUsage.reads} + 1` },
+    })
+    .returning({ reads: addUsage.reads });
+  return (row?.reads ?? Infinity) <= dailyLimit;
 }

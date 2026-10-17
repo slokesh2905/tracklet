@@ -14,14 +14,14 @@ import { catalogItems, itemInsights, priceHistory, products, type CatalogItemRow
 import { serverEnv } from "@/lib/env";
 import { buildEvidence, gateVerdict } from "@/lib/evidence";
 import { computeInsights } from "@/lib/insights";
-import { consumeAiQuota, ownsCollection } from "@/lib/ownership";
+import { consumeAddQuota, consumeAiQuota, ownsCollection } from "@/lib/ownership";
 import { processReading, type PipelineItem } from "@/lib/pipeline";
 import { createDbPipelineStore, loadPipelineItem } from "@/lib/pipeline-store";
 import { guardPrice } from "@/lib/price-guard";
 import { productKeyFromUrl, resolveUrl } from "@/lib/product-key";
 import { makeScraper } from "@/lib/reader";
 import { getUser } from "@/lib/session";
-import { alertRulesSchema, firstIssue, productUrlSchema, uuidSchema } from "@/lib/validation";
+import { alertRulesSchema, firstIssue, newAlertRulesSchema, productUrlSchema, uuidSchema } from "@/lib/validation";
 
 /** A catalog item checked this recently is attached as-is: no fetch, no credits. */
 const FRESH_MS = 6 * 60 * 60 * 1000;
@@ -68,12 +68,112 @@ function enrichInBackground(item: CatalogItemRow) {
   });
 }
 
+type ReadResult = { ok: true; item: CatalogItemRow; created: boolean } | { ok: false; error: string };
+
+/**
+ * Fetch the page behind `resolved` and store the reading: a new catalog item, or a fresh reading
+ * for `existing`. This is the only place a page is fetched on behalf of a user adding a product,
+ * so it is also where the daily read limit applies.
+ */
+async function readAndStore(userId: string, resolved: string, existing: CatalogItemRow | null): Promise<ReadResult> {
+  if (!(await consumeAddQuota(userId, serverEnv("ADD_DAILY_LIMIT")))) {
+    return { ok: false, error: "You've reached today's limit for adding products. Try again tomorrow." };
+  }
+
+  let scraped;
+  try {
+    scraped = await makeScraper().scrape(resolved);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn't read that page" };
+  }
+  // The page itself may reveal a more precise identity (final URL after redirects, SKU).
+  const key = productKeyFromUrl(scraped.finalUrl ?? resolved, scraped.sku);
+  const item = existing ?? (await findItemByKey(key.key));
+
+  if (!item) {
+    const first = guardPrice({
+      price: scraped.price,
+      originalPrice: scraped.originalPrice,
+      method: scraped.method ?? "jsonld",
+      lastConfirmed: null,
+      pending: null,
+    });
+    if (first.action === "reject") {
+      return { ok: false, error: "We couldn't read a reliable price from that page. Please try again later." };
+    }
+    return { ok: true, item: await createItem(key, scraped), created: true };
+  }
+
+  if (item.key !== key.key && item.key.startsWith("url:")) await rekeyItem(item, key);
+  await processReading(toPipelineItem(item), scraped, createDbPipelineStore());
+  return { ok: true, item: (await findItemByKey(key.key)) ?? item, created: false };
+}
+
+/** What the add flow shows before anything is tracked. */
+export type ProductPreview = {
+  name: string;
+  imageUrl: string | null;
+  price: number;
+  originalPrice: number | null;
+  currency: string;
+  inStock: boolean;
+  /** Set when the user already tracks this product. */
+  trackedProductId: string | null;
+};
+
+/**
+ * Read a product so the user can confirm it (and set an alert) before tracking it. A known product
+ * is returned as stored, costing nothing. An unknown one is read once and added to the shared
+ * catalog, which nobody checks until someone tracks it; adding it afterwards then finds it fresh,
+ * so the price is never re-read and never taken from the client.
+ */
+export async function previewProduct(rawUrl: string): Promise<ActionResult<{ preview: ProductPreview }>> {
+  const parsed = productUrlSchema.safeParse(rawUrl);
+  if (!parsed.success) return fail(firstIssue(parsed.error));
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+
+  const resolved = await resolveUrl(parsed.data);
+  let item = await findItemByKey(productKeyFromUrl(resolved).key);
+  if (!item) {
+    const read = await readAndStore(user.id, resolved, null);
+    if (!read.ok) return fail(read.error);
+    item = read.item;
+  }
+
+  const tracking = await db.query.products.findFirst({
+    columns: { id: true },
+    where: and(eq(products.user_id, user.id), eq(products.catalog_item_id, item.id)),
+  });
+  return {
+    ok: true,
+    preview: {
+      name: item.name,
+      imageUrl: item.image_url,
+      price: item.current_price,
+      originalPrice: item.original_price,
+      currency: item.currency,
+      inStock: item.in_stock,
+      trackedProductId: tracking?.id ?? null,
+    },
+  };
+}
+
+type AddOptions = {
+  collectionId?: string | null;
+  /** Alert rules to start with; empty means "alert on every drop". */
+  targetPrice?: string | number | null;
+  alertPct?: string | number | null;
+};
+
 export async function addProduct(
   rawUrl: string,
-  collectionId?: string | null
+  { collectionId, targetPrice, alertPct }: AddOptions = {}
 ): Promise<ActionResult<{ productId: string; updated: boolean }>> {
   const parsed = productUrlSchema.safeParse(rawUrl);
   if (!parsed.success) return fail(firstIssue(parsed.error));
+  const rules = newAlertRulesSchema.safeParse({ targetPrice, alertPct });
+  if (!rules.success) return fail(firstIssue(rules.error));
 
   const user = await getUser();
   if (!user) return fail("Please sign in first");
@@ -85,39 +185,21 @@ export async function addProduct(
   let created = false;
 
   if (!item || !isFresh(item, FRESH_MS)) {
-    let scraped;
-    try {
-      scraped = await makeScraper().scrape(resolved);
-    } catch (error) {
-      return fail(error instanceof Error ? error.message : "Couldn't read that page");
-    }
-    // The page itself may reveal a more precise identity (final URL after redirects, SKU).
-    const key = productKeyFromUrl(scraped.finalUrl ?? resolved, scraped.sku);
-    item ??= await findItemByKey(key.key);
-
-    if (!item) {
-      const first = guardPrice({
-        price: scraped.price,
-        originalPrice: scraped.originalPrice,
-        method: scraped.method ?? "jsonld",
-        lastConfirmed: null,
-        pending: null,
-      });
-      if (first.action === "reject") {
-        return fail("We couldn't read a reliable price from that page. Please try again later.");
-      }
-      item = await createItem(key, scraped);
-      created = true;
-    } else {
-      if (item.key !== key.key && item.key.startsWith("url:")) await rekeyItem(item, key);
-      await processReading(toPipelineItem(item), scraped, createDbPipelineStore());
-      item = (await findItemByKey(key.key)) ?? item;
-    }
+    const read = await readAndStore(user.id, resolved, item);
+    if (!read.ok) return fail(read.error);
+    ({ item, created } = read);
   }
 
+  const hasRules = rules.data.targetPrice !== null || rules.data.alertPct !== null;
+  const ruleValues = { target_price: rules.data.targetPrice, alert_pct: rules.data.alertPct };
   const [tracking] = await db
     .insert(products)
-    .values({ user_id: user.id, catalog_item_id: item.id, ...(collectionId ? { collection_id: collectionId } : {}) })
+    .values({
+      user_id: user.id,
+      catalog_item_id: item.id,
+      ...(collectionId ? { collection_id: collectionId } : {}),
+      ...ruleValues,
+    })
     .onConflictDoNothing({ target: [products.user_id, products.catalog_item_id] })
     .returning({ id: products.id });
 
@@ -129,7 +211,9 @@ export async function addProduct(
       where: and(eq(products.user_id, user.id), eq(products.catalog_item_id, item.id)),
     });
     productId = existing!.id;
-    if (collectionId) await db.update(products).set({ collection_id: collectionId }).where(eq(products.id, productId));
+    // Re-adding with a choice made is an update; re-adding bare leaves what was set alone.
+    const changes = { ...(collectionId ? { collection_id: collectionId } : {}), ...(hasRules ? ruleValues : {}) };
+    if (Object.keys(changes).length > 0) await db.update(products).set(changes).where(eq(products.id, productId));
   }
 
   if (created || !item.compared_at) enrichInBackground(item);
@@ -316,6 +400,7 @@ export async function generateVerdict(productId: string): Promise<ActionResult> 
     firstSeen: item.priceHistory[0]?.checked_at ?? item.created_at,
     shoppers: item.trackers.length,
     insights,
+    history: item.priceHistory,
     offers: toStoreOffers(item.offers),
   });
   const gate = gateVerdict(evidence);

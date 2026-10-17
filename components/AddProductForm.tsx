@@ -4,17 +4,21 @@ import { useState } from "react";
 import { ListPlus, Link2, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { addProduct } from "@/app/actions/products";
+import AddFlow from "@/components/app/AddFlow";
 import AuthModal from "@/components/AuthModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import type { CollectionRow } from "@/lib/db/schema";
 import { hostname } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { bulkUrlsSchema, firstIssue } from "@/lib/validation";
 
 type Props = {
   signedIn: boolean;
+  /** Offered in the signed-in flow so a product can be filed as it is added. */
+  collections?: Pick<CollectionRow, "id" | "name">[];
   collectionId?: string | null;
   onAddingChange?: (adding: boolean) => void;
   /** Called once at least one product was added, so a hosting sheet can close. */
@@ -22,11 +26,12 @@ type Props = {
   size?: "hero" | "default";
 };
 
-export default function AddProductForm({ signedIn, collectionId, onAddingChange, onAdded, size = "default" }: Props) {
+export default function AddProductForm({ signedIn, collections = [], collectionId, onAddingChange, onAdded, size = "default" }: Props) {
   const [mode, setMode] = useState<"single" | "bulk">("single");
   const [url, setUrl] = useState("");
   const [bulkText, setBulkText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -40,21 +45,6 @@ export default function AddProductForm({ signedIn, collectionId, onAddingChange,
     onAddingChange?.(false);
   }
 
-  async function submitSingle(e: React.FormEvent) {
-    e.preventDefault();
-    if (!signedIn) return setAuthOpen(true);
-    begin();
-    const result = await addProduct(url, collectionId);
-    if (result.ok) {
-      toast.success(result.message);
-      setUrl("");
-      onAdded?.();
-    } else {
-      toast.error(result.error);
-    }
-    finish();
-  }
-
   async function submitBulk(e: React.FormEvent) {
     e.preventDefault();
     if (!signedIn) return setAuthOpen(true);
@@ -66,7 +56,7 @@ export default function AddProductForm({ signedIn, collectionId, onAddingChange,
     const failed: string[] = [];
     for (const [i, u] of urls.entries()) {
       setProgress({ done: i, total: urls.length, current: hostname(u) });
-      const result = await addProduct(u, collectionId);
+      const result = await addProduct(u, { collectionId });
       if (!result.ok) failed.push(u);
     }
     finish();
@@ -90,27 +80,36 @@ export default function AddProductForm({ signedIn, collectionId, onAddingChange,
   return (
     <div className="w-full">
       {mode === "single" ? (
-        <form onSubmit={submitSingle} className="flex flex-col gap-2 sm:flex-row">
-          <div className="relative flex-1">
-            <Link2 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="url"
-              inputMode="url"
-              autoComplete="off"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="Paste a product link from any store"
-              aria-label="Product URL"
-              className={cn("pl-9 bg-background", hero && "h-12 pointer-coarse:h-12 text-base md:text-base")}
-              required
-              disabled={loading}
-            />
-          </div>
-          <Button type="submit" disabled={loading} size={hero ? "lg" : "default"} className={cn("gap-2", hero && "h-12 px-6")}>
-            {loading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-            {loading ? "Reading page…" : "Track price"}
-          </Button>
-        </form>
+        signedIn ? (
+          <AddFlow collections={collections} onAdded={() => onAdded?.()} onAddingChange={onAddingChange} onPreviewingChange={setPreviewing} />
+        ) : (
+          // Signed out there is nothing to preview: asking to sign in is the whole flow.
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setAuthOpen(true);
+            }}
+            className="flex flex-col gap-2 sm:flex-row"
+          >
+            <div className="relative flex-1">
+              <Link2 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="Paste a product link from any store"
+                aria-label="Product URL"
+                className={cn("pl-9 bg-background", hero && "h-12 pointer-coarse:h-12 text-base md:text-base")}
+                required
+              />
+            </div>
+            <Button type="submit" size={hero ? "lg" : "default"} className={cn("gap-2", hero && "h-12 px-6")}>
+              <Plus className="size-4" /> Track price
+            </Button>
+          </form>
+        )
       ) : (
         <form onSubmit={submitBulk} className="flex flex-col gap-2">
           <Textarea
@@ -136,7 +135,7 @@ export default function AddProductForm({ signedIn, collectionId, onAddingChange,
         </form>
       )}
 
-      {signedIn && (
+      {signedIn && !previewing && (
         <button
           type="button"
           onClick={() => setMode(mode === "single" ? "bulk" : "single")}

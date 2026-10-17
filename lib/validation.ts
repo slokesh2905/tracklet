@@ -20,12 +20,27 @@ export function normalizeProductUrl(input: string) {
     : text;
 }
 
+/**
+ * Hosts that only make sense on someone's own network. The server fetches whatever URL it is given,
+ * so refuse these up front instead of letting a pasted link probe the machine it runs on.
+ */
+export function isPrivateHost(rawHostname: string) {
+  const host = rawHostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || /\.(localhost|local|internal|lan)$/.test(host)) return true;
+  if (host.includes(":")) return host === "::1" || host === "::" || /^(fc|fd|fe80)/.test(host);
+  const octets = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)?.slice(1).map(Number);
+  if (!octets) return false;
+  const [a, b] = octets as [number, number];
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
 export const productUrlSchema = z
   .string()
   .trim()
   .min(1, "Paste a product URL")
   .max(2048, "That URL is too long")
   .pipe(z.url({ protocol: /^https?$/, message: "Enter a valid http(s) URL" }))
+  .refine((u) => !URL.canParse(u) || !isPrivateHost(new URL(u).hostname), "That link points to a private address")
   .transform(normalizeProductUrl);
 
 export const bulkUrlsSchema = z
@@ -48,8 +63,7 @@ export const bulkUrlsSchema = z
 const emptyToNull = (v: unknown) =>
   v === "" || v === null || v === undefined ? null : Number(v);
 
-export const alertRulesSchema = z.object({
-  productId: z.uuid(),
+const alertRuleShape = {
   targetPrice: z.preprocess(
     emptyToNull,
     z.number("Enter a number").positive("Must be above 0").max(1e9).nullable()
@@ -58,7 +72,12 @@ export const alertRulesSchema = z.object({
     emptyToNull,
     z.number("Enter a number").min(1, "At least 1%").max(90, "At most 90%").nullable()
   ),
-});
+};
+
+/** The rules alone, for a product that doesn't exist yet. */
+export const newAlertRulesSchema = z.object(alertRuleShape);
+
+export const alertRulesSchema = z.object({ productId: z.uuid(), ...alertRuleShape });
 
 export const settingsSchema = z.object({
   preferredCurrency: z.enum(SUPPORTED_CURRENCIES),

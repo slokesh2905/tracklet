@@ -335,6 +335,36 @@ export const aiUsage = pgTable(
   (t) => [primaryKey({ columns: [t.user_id, t.day] })]
 );
 
+/** One row per browser or phone a user turned push alerts on for. */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    user_agent: text("user_agent"),
+    created_at: createdAt(),
+  },
+  (t) => [index("push_subscriptions_user_idx").on(t.user_id)]
+);
+
+/** Pages read for a user per day (each costs a fetch and, on hard sites, a Firecrawl credit). */
+export const addUsage = pgTable(
+  "add_usage",
+  {
+    user_id: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    day: date("day").notNull().default(sql`current_date`),
+    reads: integer("reads").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.user_id, t.day] })]
+);
+
 /** Cron observability. */
 export const checkRuns = pgTable("check_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -399,6 +429,7 @@ export type CollectionRow = typeof collections.$inferSelect;
 export type PriceHistoryRow = typeof priceHistory.$inferSelect;
 export type AlertRow = typeof alerts.$inferSelect;
 export type UserSettingsRow = typeof userSettings.$inferSelect;
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
 export type ItemInsightRow = typeof itemInsights.$inferSelect;
 export type StoreOfferRow = typeof storeOffers.$inferSelect;
 export type CheckRunRow = typeof checkRuns.$inferSelect;

@@ -129,7 +129,7 @@ export default function Dashboard({ products, stats, collections }: Props) {
         <p className="mb-4 text-sm text-muted-foreground">
           Paste a link from Amazon, Flipkart, Best Buy or almost any store.
         </p>
-        <AddProductForm signedIn onAddingChange={setAdding} />
+        <AddProductForm signedIn collections={collections} onAddingChange={setAdding} />
       </section>
 
       {products.length > 0 && <StatsRow stats={stats} onShowDeals={() => setFilter("deals")} />}
