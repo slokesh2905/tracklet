@@ -17,10 +17,12 @@ type Props = {
   signedIn: boolean;
   collectionId?: string | null;
   onAddingChange?: (adding: boolean) => void;
+  /** Called once at least one product was added, so a hosting sheet can close. */
+  onAdded?: () => void;
   size?: "hero" | "default";
 };
 
-export default function AddProductForm({ signedIn, collectionId, onAddingChange, size = "default" }: Props) {
+export default function AddProductForm({ signedIn, collectionId, onAddingChange, onAdded, size = "default" }: Props) {
   const [mode, setMode] = useState<"single" | "bulk">("single");
   const [url, setUrl] = useState("");
   const [bulkText, setBulkText] = useState("");
@@ -46,6 +48,7 @@ export default function AddProductForm({ signedIn, collectionId, onAddingChange,
     if (result.ok) {
       toast.success(result.message);
       setUrl("");
+      onAdded?.();
     } else {
       toast.error(result.error);
     }
@@ -69,7 +72,10 @@ export default function AddProductForm({ signedIn, collectionId, onAddingChange,
     finish();
 
     const added = urls.length - failed.length;
-    if (added > 0) toast.success(`Tracking ${added} product${added === 1 ? "" : "s"}`);
+    if (added > 0) {
+      toast.success(`Tracking ${added} product${added === 1 ? "" : "s"}`);
+      onAdded?.();
+    }
     if (failed.length > 0) {
       toast.error(`${failed.length} couldn't be read`, { description: failed.map(hostname).join(", ") });
       setBulkText(failed.join("\n"));

@@ -9,13 +9,15 @@ export default function GlassNav({
   children,
   width = "max-w-6xl",
   className,
+  headerClassName,
 }: {
   children: React.ReactNode;
   width?: string;
   className?: string;
+  headerClassName?: string;
 }) {
   return (
-    <header className="pointer-events-none sticky top-0 z-40 px-3 pt-[calc(env(safe-area-inset-top)+0.5rem)] sm:px-4">
+    <header className={cn("pointer-events-none sticky top-0 z-40 px-3 pt-[calc(env(safe-area-inset-top)+0.5rem)] sm:px-4", headerClassName)}>
       <div
         className={cn(
           "glass pointer-events-auto mx-auto flex h-14 items-center rounded-2xl border border-glass-edge px-3 shadow-lg shadow-black/5 sm:px-4",

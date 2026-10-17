@@ -1,4 +1,4 @@
-import { BadgePercent, Package, PiggyBank, TrendingDown } from "lucide-react";
+import { BadgePercent, ChevronRight, Package, PiggyBank, TrendingDown } from "lucide-react";
 import type { DashboardStats } from "@/lib/data";
 import { formatPercent, formatPrice } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -30,9 +30,50 @@ function Stat({
   );
 }
 
-export default function StatsRow({ stats }: { stats: DashboardStats }) {
+/** Phones get one compact strip instead of four tiles, so the product list starts on the first screen. */
+function StatsStrip({ stats, onShowDeals }: { stats: DashboardStats; onShowDeals?: () => void }) {
+  const label = "flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground";
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-[1.2fr_1fr_1fr] rounded-2xl border bg-card py-3 md:hidden">
+      <div className="flex min-w-0 flex-col gap-0.5 px-3.5">
+        <span className={label}>
+          <PiggyBank className="size-3.5 text-success" /> Saved
+        </span>
+        <span className={cn("truncate text-[1.1875rem] font-bold tabular-nums", stats.totalSavings > 0 && "text-success")}>
+          {formatPrice(stats.totalSavings, stats.currency)}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onShowDeals}
+        className="flex min-w-0 flex-col items-start gap-0.5 border-l px-3.5 text-left"
+        aria-label={`${stats.greatDeals} great deals, show them`}
+      >
+        <span className={label}>
+          <BadgePercent className="size-3.5 text-primary" /> Great deals
+        </span>
+        <span className="flex items-center gap-1 text-[1.1875rem] font-bold">
+          {stats.greatDeals}
+          <ChevronRight className="size-3.5 text-muted-foreground" />
+        </span>
+      </button>
+      <div className="flex min-w-0 flex-col gap-0.5 border-l px-3.5">
+        <span className={label}>
+          <TrendingDown className="size-3.5 text-success" /> Best drop
+        </span>
+        <span className={cn("text-[1.1875rem] font-bold", stats.biggestDrop && "text-success")}>
+          {stats.biggestDrop ? formatPercent(stats.biggestDrop.percentChange, { signed: true }) : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export default function StatsRow({ stats, onShowDeals }: { stats: DashboardStats; onShowDeals?: () => void }) {
+  return (
+    <>
+    <StatsStrip stats={stats} onShowDeals={onShowDeals} />
+    <div className="hidden grid-cols-2 gap-3 md:grid lg:grid-cols-4">
       <Stat icon={Package} label="Tracking" value={String(stats.totalTracked)} hint={stats.totalTracked === 1 ? "product" : "products"} />
       <Stat
         icon={PiggyBank}
@@ -55,5 +96,6 @@ export default function StatsRow({ stats }: { stats: DashboardStats }) {
         hint="deal score 80+"
       />
     </div>
+    </>
   );
 }

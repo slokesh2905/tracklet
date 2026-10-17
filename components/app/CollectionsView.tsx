@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { FolderHeart, ImageOff, Loader2, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderHeart, FolderPlus, Globe, ImageOff, Loader2, Lock, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createCollection,
@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { CollectionRow, ProductRow } from "@/lib/db/schema";
 import { formatPrice } from "@/lib/format";
 import { deleteWithUndo } from "@/lib/undo";
@@ -82,17 +83,28 @@ function NameDialog({
   );
 }
 
-function CollectionCard({ collection }: { collection: Collection }) {
+function CollectionCard({
+  collection,
+  onRemovedChange,
+}: {
+  collection: Collection;
+  /** Lets a hosting tile hide itself along with the card. */
+  onRemovedChange?: (removed: boolean) => void;
+}) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [removed, setRemoved] = useState(false);
   const count = collection.products.length;
 
   function deleteCollectionWithUndo() {
     setRemoved(true);
+    onRemovedChange?.(true);
     deleteWithUndo({
       message: "Collection deleted (products kept)",
       commit: () => deleteCollection(collection.id),
-      restore: () => setRemoved(false),
+      restore: () => {
+        setRemoved(false);
+        onRemovedChange?.(false);
+      },
     });
   }
 
@@ -171,6 +183,86 @@ function CollectionCard({ collection }: { collection: Collection }) {
   );
 }
 
+/** A phone shows each collection as a tile; tapping it opens the full card (products, sharing) in a sheet. */
+function CollectionTile({ collection }: { collection: Collection }) {
+  const [open, setOpen] = useState(false);
+  const [removed, setRemoved] = useState(false);
+  const count = collection.products.length;
+  const covers = collection.products.slice(0, 2);
+  const currencies = new Set(collection.products.map((p) => p.currency));
+  // A total only makes sense when everything is priced in the same currency.
+  const total =
+    currencies.size === 1 && count > 0
+      ? formatPrice(
+          collection.products.reduce((sum, p) => sum + Number(p.current_price), 0),
+          collection.products[0]!.currency
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        type="button"
+        hidden={removed}
+        onClick={() => setOpen(true)}
+        className="flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-card text-left shadow-xs"
+      >
+        <span className="grid h-28 w-full grid-cols-2 gap-px bg-border">
+          {covers.length === 0 ? (
+            <span className="col-span-2 flex items-center justify-center bg-card">
+              <FolderHeart className="size-7 text-muted-foreground" />
+            </span>
+          ) : (
+            covers.map((p) => (
+              <span key={p.id} className="flex items-center justify-center bg-card p-2.5">
+                {p.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.image_url} alt="" loading="lazy" className="size-full rounded-lg object-contain" />
+                ) : (
+                  <ImageOff className="size-4 text-muted-foreground" />
+                )}
+              </span>
+            ))
+          )}
+        </span>
+        <span className="flex flex-col gap-0.5 px-3 pt-2.5 pb-3">
+          <span className="truncate text-[0.9375rem] font-semibold">{collection.name}</span>
+          <span className="text-xs text-muted-foreground">
+            {count} product{count === 1 ? "" : "s"}
+            {total && ` · ${total}`}
+          </span>
+          <span className="mt-2 flex">
+            {collection.is_public ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-chart-2/15 px-2 py-0.5 text-xs font-medium text-chart-2">
+                <Globe className="size-[0.6875rem]" /> Shared
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                <Lock className="size-[0.6875rem]" /> Private
+              </span>
+            )}
+          </span>
+        </span>
+      </button>
+
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent side="bottom" showCloseButton={false} className="max-h-[88dvh] overflow-y-auto rounded-t-2xl p-4 pt-7 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+          <SheetHeader className="sr-only">
+            <SheetTitle>{collection.name}</SheetTitle>
+          </SheetHeader>
+          <CollectionCard
+            collection={collection}
+            onRemovedChange={(r) => {
+              setRemoved(r);
+              if (r) setOpen(false);
+            }}
+          />
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
 export default function CollectionsView({ collections }: { collections: Collection[] }) {
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -178,11 +270,12 @@ export default function CollectionsView({ collections }: { collections: Collecti
     <div className="flex flex-col gap-6">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Collections</h1>
-          <p className="text-sm text-muted-foreground">Organise products and share wishlists.</p>
+          <h1 className="text-[1.75rem] leading-tight font-bold tracking-tight md:text-2xl">Collections</h1>
+          <p className="text-sm text-muted-foreground">Group products into wishlists and share them.</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="gap-2">
-          <Plus className="size-4" /> <span className="max-sm:sr-only">New collection</span>
+        <Button onClick={() => setCreateOpen(true)} className="gap-2 max-md:h-10 max-md:rounded-full max-md:bg-primary/12 max-md:text-primary max-md:hover:bg-primary/20">
+          <Plus className="size-4" /> <span className="md:hidden">New</span>
+          <span className="max-md:hidden">New collection</span>
         </Button>
       </div>
 
@@ -198,11 +291,28 @@ export default function CollectionsView({ collections }: { collections: Collecti
           </Button>
         </section>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {collections.map((c) => (
-            <CollectionCard key={c.id} collection={c} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 md:hidden">
+            {collections.map((c) => (
+              <CollectionTile key={c.id} collection={c} />
+            ))}
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed text-muted-foreground"
+            >
+              <span className="flex size-11 items-center justify-center rounded-full border bg-card">
+                <FolderPlus className="size-5 text-primary" />
+              </span>
+              <span className="text-sm font-medium text-foreground">New collection</span>
+            </button>
+          </div>
+          <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-3">
+            {collections.map((c) => (
+              <CollectionCard key={c.id} collection={c} />
+            ))}
+          </div>
+        </>
       )}
 
       <NameDialog

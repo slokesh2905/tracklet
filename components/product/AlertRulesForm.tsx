@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { updateAlertRules } from "@/app/actions/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import AlertStepper, { type AlertMode, type PriceRange } from "@/components/product/AlertStepper";
 import { Label } from "@/components/ui/label";
 import { formatPrice } from "@/lib/format";
 
@@ -15,6 +16,8 @@ type Props = {
   currentPrice: number;
   targetPrice: number | null;
   alertPct: number | null;
+  /** Price history range, used to draw the phone's price scale. */
+  range?: PriceRange | null;
   onSaved?: () => void;
 };
 
@@ -24,10 +27,12 @@ export default function AlertRulesForm({
   currentPrice,
   targetPrice,
   alertPct,
+  range,
   onSaved,
 }: Props) {
   const [target, setTarget] = useState(targetPrice?.toString() ?? "");
   const [pct, setPct] = useState(alertPct?.toString() ?? "");
+  const [mode, setMode] = useState<AlertMode>(alertPct !== null && targetPrice === null ? "pct" : "price");
   const [pending, startTransition] = useTransition();
 
   const suggestions = [5, 10, 20].map((off) => Math.floor(currentPrice * (1 - off / 100)));
@@ -45,9 +50,33 @@ export default function AlertRulesForm({
     });
   }
 
+  // The phone stepper edits one rule at a time; switching type drops the other so it can't linger unseen.
+  function changeMode(next: AlertMode) {
+    setMode(next);
+    if (next === "price") {
+      setPct("");
+      setTarget((t) => t || String(Math.floor(currentPrice * 0.9)));
+    } else {
+      setTarget("");
+      setPct((p) => p || "10");
+    }
+  }
+
+  const stepperValue = mode === "price" ? (target ? Number(target) : null) : pct ? Number(pct) : null;
+
   return (
     <form onSubmit={save} className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2">
+      <AlertStepper
+        currency={currency}
+        currentPrice={currentPrice}
+        range={range}
+        mode={mode}
+        onModeChange={changeMode}
+        value={stepperValue}
+        onChange={(v) => (mode === "price" ? setTarget(String(v)) : setPct(String(v)))}
+      />
+
+      <div className="flex flex-col gap-2 max-md:hidden">
         <Label htmlFor={`target-${productId}`}>Alert me when the price is at or below</Label>
         <div className="relative">
           <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">
@@ -76,7 +105,7 @@ export default function AlertRulesForm({
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 max-md:hidden">
         <Label htmlFor={`pct-${productId}`}>…or when it drops by at least</Label>
         <div className="relative">
           <Input
@@ -94,13 +123,13 @@ export default function AlertRulesForm({
         </p>
       </div>
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <div className="flex gap-2.5 sm:justify-end">
         {(target || pct) && (
-          <Button type="button" variant="ghost" onClick={() => { setTarget(""); setPct(""); }}>
-            Clear rules
+          <Button type="button" variant="outline" className="text-danger hover:text-danger max-md:h-12" onClick={() => { setTarget(""); setPct(""); }}>
+            Clear<span className="max-md:hidden">&nbsp;rules</span>
           </Button>
         )}
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending} className="max-md:h-12 max-md:flex-1 max-md:text-base">
           {pending && <Loader2 className="size-4 animate-spin" />}
           Save alert
         </Button>

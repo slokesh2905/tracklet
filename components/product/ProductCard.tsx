@@ -76,6 +76,62 @@ export default function ProductCard({ product, collections }: Props) {
     });
   }
 
+  const badges: Array<{ node: React.ReactNode; desktopOnly?: boolean }> = [];
+  if (!product.in_stock) {
+    badges.push({
+      node: (
+        <span className="inline-flex items-center gap-1 rounded-full bg-danger/12 px-2 py-0.5 text-xs font-medium text-danger">
+          <PackageX className="size-3" /> Out of stock
+        </span>
+      ),
+    });
+  }
+  if (product.paused) {
+    badges.push({
+      node: (
+        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          <PauseCircle className="size-3" /> Checks paused
+        </span>
+      ),
+    });
+  }
+  // On a phone the change badge sits beside the price instead.
+  badges.push({ node: <ChangeBadge status={product.status} percentChange={product.percentChange} />, desktopOnly: true });
+  if (product.isAllTimeLow && product.status !== "new") badges.push({ node: <AllTimeLowBadge /> });
+  if (product.status !== "new" && product.in_stock) badges.push({ node: <DealBadge score={product.dealScore} label={product.dealLabel} /> });
+  if (product.verdict) badges.push({ node: <VerdictBadge verdict={product.verdict} /> });
+  if (product.bestOffer && product.bestOffer.savingPct >= 3) {
+    badges.push({
+      node: (
+        <span className="inline-flex items-center gap-1 rounded-full bg-chart-2/15 px-2 py-0.5 text-xs font-medium text-chart-2">
+          <Store className="size-3" /> Cheaper on {retailerName(product.bestOffer.retailer)} ·{" "}
+          {formatPrice(product.bestOffer.price, product.currency)}
+        </span>
+      ),
+    });
+  }
+  if (product.shoppers > 1) {
+    badges.push({
+      node: (
+        <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+          <Users className="size-3" /> {product.shoppers} tracking
+        </span>
+      ),
+    });
+  }
+  if (hasRule) {
+    badges.push({
+      node: (
+        <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+          <Target className="size-3" />
+          {product.target_price !== null
+            ? `≤ ${formatPrice(product.target_price, product.currency)}`
+            : `−${product.alert_pct}%`}
+        </span>
+      ),
+    });
+  }
+
   return (
     <article hidden={removed} className="group relative flex flex-col rounded-xl border bg-card p-3 shadow-xs transition-[box-shadow,scale,opacity] hover:shadow-md sm:p-4">
       <div className="flex gap-3">
@@ -101,7 +157,7 @@ export default function ProductCard({ product, collections }: Props) {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" className="relative z-10 -mt-1 -mr-1 shrink-0" aria-label="Product actions">
+                <Button variant="ghost" size="icon-sm" className="relative z-10 -mt-1 -mr-1 shrink-0 pointer-coarse:size-11 pointer-coarse:-mt-2.5 pointer-coarse:-mr-2.5" aria-label="Product actions">
                   <MoreVertical className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -146,57 +202,41 @@ export default function ProductCard({ product, collections }: Props) {
             )}
           </p>
 
-          <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2">
-            <span className="text-xl font-bold">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 md:items-baseline">
+            <span className="text-lg font-bold tabular-nums md:text-xl">
               {formatPrice(product.current_price, product.currency)}
             </span>
+            {/* On a phone the change and the trend sit beside the price, where they're read first. */}
+            <span className="md:hidden">
+              <ChangeBadge status={product.status} percentChange={product.percentChange} />
+            </span>
             {discount !== null && (
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground max-md:hidden">
                 <s>{formatPrice(product.original_price!, product.currency)}</s>{" "}
                 <span className="text-success">{formatPercent(discount, { signed: true })}</span>
               </span>
             )}
+            <Sparkline values={product.spark} className="ml-auto hidden h-6 w-16 shrink-0 max-md:block" />
           </div>
         </div>
       </div>
 
-      <Sparkline values={product.spark} className="mt-3" />
+      <Sparkline values={product.spark} className="mt-3 max-md:hidden" />
 
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {!product.in_stock && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-danger/12 px-2 py-0.5 text-xs font-medium text-danger">
-            <PackageX className="size-3" /> Out of stock
-          </span>
-        )}
-        {product.paused && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            <PauseCircle className="size-3" /> Checks paused
-          </span>
-        )}
-        <ChangeBadge status={product.status} percentChange={product.percentChange} />
-        {product.isAllTimeLow && product.status !== "new" && <AllTimeLowBadge />}
-        {product.status !== "new" && product.in_stock && <DealBadge score={product.dealScore} label={product.dealLabel} />}
-        {product.verdict && <VerdictBadge verdict={product.verdict} />}
-        {product.bestOffer && product.bestOffer.savingPct >= 3 && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-chart-2/15 px-2 py-0.5 text-xs font-medium text-chart-2">
-            <Store className="size-3" /> Cheaper on {retailerName(product.bestOffer.retailer)} ·{" "}
-            {formatPrice(product.bestOffer.price, product.currency)}
-          </span>
-        )}
-        {product.shoppers > 1 && (
-          <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-            <Users className="size-3" /> {product.shoppers} tracking
-          </span>
-        )}
-        {hasRule && (
-          <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-            <Target className="size-3" />
-            {product.target_price !== null
-              ? `≤ ${formatPrice(product.target_price, product.currency)}`
-              : `−${product.alert_pct}%`}
-          </span>
-        )}
-      </div>
+      {badges.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {/* Phones show the two most useful badges; the full set is one tap away on the product page. */}
+          {badges.map((badge, i) => {
+            const phoneRank = badges.slice(0, i).filter((b) => !b.desktopOnly).length;
+            const hiddenOnPhone = badge.desktopOnly || phoneRank >= 2;
+            return (
+              <span key={i} className={hiddenOnPhone ? "contents max-md:hidden" : "contents"}>
+                {badge.node}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       <Dialog open={alertOpen} onOpenChange={setAlertOpen}>
         <DialogContent>

@@ -9,24 +9,32 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { hostname } from "@/lib/format";
 
-type Props = { productId: string; url: string; paused: boolean };
+type Props = {
+  productId: string;
+  url: string;
+  paused: boolean;
+  /** Phone layout at the end of the page: quiet text buttons, no store button (the pinned bar has it). */
+  footer?: boolean;
+};
 
-export default function ProductActions({ productId, url, paused }: Props) {
+export default function ProductActions({ productId, url, paused, footer = false }: Props) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
   return (
-    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-      <Button asChild className="col-span-2 gap-2 sm:col-auto">
-        <a href={url} target="_blank" rel="noopener noreferrer">
-          <ExternalLink className="size-4" /> View on {hostname(url)}
-        </a>
-      </Button>
+    <div className={footer ? "flex flex-col items-stretch gap-1 md:hidden" : "grid grid-cols-2 gap-2 max-md:hidden sm:flex sm:flex-wrap"}>
+      {!footer && (
+        <Button asChild className="col-span-2 gap-2 sm:col-auto">
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="size-4" /> View on {hostname(url)}
+          </a>
+        </Button>
+      )}
       {paused ? (
         <Button
-          variant="outline"
-          className="gap-2"
+          variant={footer ? "ghost" : "outline"}
+          className="gap-2 pointer-coarse:h-11"
           disabled={pending}
           onClick={() =>
             startTransition(async () => {
@@ -40,8 +48,8 @@ export default function ProductActions({ productId, url, paused }: Props) {
         </Button>
       ) : (
         <Button
-          variant="outline"
-          className="gap-2"
+          variant={footer ? "ghost" : "outline"}
+          className="gap-2 pointer-coarse:h-11"
           disabled={pending}
           onClick={() =>
             startTransition(async () => {
@@ -55,8 +63,8 @@ export default function ProductActions({ productId, url, paused }: Props) {
           Check now
         </Button>
       )}
-      <Button variant="outline" className="gap-2 text-danger hover:text-danger" onClick={() => setConfirmOpen(true)}>
-        <Trash2 className="size-4" /> Remove
+      <Button variant={footer ? "ghost" : "outline"} className="gap-2 text-danger hover:text-danger pointer-coarse:h-11" onClick={() => setConfirmOpen(true)}>
+        <Trash2 className="size-4" /> {footer ? "Stop tracking" : "Remove"}
       </Button>
 
       <ConfirmDialog

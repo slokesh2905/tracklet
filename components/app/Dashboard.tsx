@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { timeAgo } from "@/lib/format";
 import type { DashboardProduct, DashboardStats, ProductStatus } from "@/lib/data";
 import type { CollectionRow } from "@/lib/db/schema";
 import { isGreatDeal } from "@/lib/deals";
@@ -71,6 +72,11 @@ export default function Dashboard({ products, stats, collections }: Props) {
     return c;
   }, [products]);
 
+  const lastChecked = useMemo(
+    () => products.map((p) => p.last_checked_at).filter((t): t is string => !!t).sort().at(-1) ?? null,
+    [products]
+  );
+
   const activeExtras = (sortBy !== "date" ? 1 : 0) + (collection !== "all" ? 1 : 0);
 
   const sortAndCollection = (
@@ -109,8 +115,16 @@ export default function Dashboard({ products, stats, collections }: Props) {
   );
 
   return (
-    <div className="flex flex-col gap-6">
-      <section className="rounded-2xl border bg-linear-to-br from-primary/10 via-card to-card p-4 sm:p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
+      {/* On a phone the title leads, and adding a product lives behind the Track tab. */}
+      <div className="md:hidden">
+        <h1 className="text-[1.75rem] leading-tight font-bold tracking-tight">Products</h1>
+        <p className="text-sm text-muted-foreground" suppressHydrationWarning>
+          {products.length} tracked{lastChecked && ` · prices checked ${timeAgo(lastChecked)}`}
+        </p>
+      </div>
+
+      <section className="hidden rounded-2xl border bg-linear-to-br from-primary/10 via-card to-card p-4 sm:p-6 md:block">
         <h1 className="text-lg font-semibold sm:text-xl">Track a new product</h1>
         <p className="mb-4 text-sm text-muted-foreground">
           Paste a link from Amazon, Flipkart, Best Buy or almost any store.
@@ -118,14 +132,15 @@ export default function Dashboard({ products, stats, collections }: Props) {
         <AddProductForm signedIn onAddingChange={setAdding} />
       </section>
 
-      {products.length > 0 && <StatsRow stats={stats} />}
+      {products.length > 0 && <StatsRow stats={stats} onShowDeals={() => setFilter("deals")} />}
 
       {products.length === 0 && !adding ? (
         <section className="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center">
           <PackageSearch className="size-12 text-muted-foreground" />
           <h2 className="mt-4 font-semibold">Nothing tracked yet</h2>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Add your first product above. We’ll check its price daily and tell you when it’s a good time to buy.
+            <span className="md:hidden">Tap Track below to add your first product.</span>
+            <span className="max-md:hidden">Add your first product above.</span> We’ll check its price daily and tell you when it’s a good time to buy.
           </p>
         </section>
       ) : (
