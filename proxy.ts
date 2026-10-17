@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
 
-const PROTECTED_PREFIXES = ["/dashboard", "/products", "/collections", "/alerts", "/settings", "/share"];
+const PROTECTED_PREFIXES = ["/home", "/dashboard", "/products", "/collections", "/alerts", "/settings", "/share"];
 
 /**
  * Optimistic redirect for signed-out visitors: only checks that a session cookie
@@ -23,5 +23,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/products/:path*", "/collections/:path*", "/alerts/:path*", "/settings/:path*", "/share/:path*"],
+  matcher: ["/home/:path*", "/dashboard/:path*", "/products/:path*", "/collections/:path*", "/alerts/:path*", "/settings/:path*", "/share/:path*"],
 };

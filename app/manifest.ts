@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Tracklet · Smart price tracker",
     short_name: "Tracklet",
     description: "Track prices from any store and get alerts when they drop.",
-    start_url: "/dashboard",
+    start_url: "/home",
     scope: "/",
     display: "standalone",
     background_color: "#ffffff",

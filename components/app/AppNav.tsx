@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, ChevronLeft, FolderHeart, LayoutGrid, LogOut, Plus, Settings } from "lucide-react";
+import { Bell, ChevronLeft, FolderHeart, House, LayoutGrid, LogOut, Plus, Settings } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import TrackSheet from "@/components/app/TrackSheet";
 import GlassNav from "@/components/GlassNav";
@@ -22,11 +22,15 @@ import type { CollectionRow } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
 
 const NAV = [
+  { href: "/home", label: "Home", icon: House },
   { href: "/dashboard", label: "Products", icon: LayoutGrid },
   { href: "/collections", label: "Collections", icon: FolderHeart },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
+
+/** The phone's tab bar: Settings lives under the avatar there. The order puts Track in the middle. */
+const TABS = [NAV[0], NAV[1], NAV[3], NAV[2]] as const;
 
 function useIsActive() {
   const pathname = usePathname();
@@ -71,7 +75,7 @@ export function AppHeader({ email, unreadAlerts }: { email: string; unreadAlerts
       </GlassNav>
     )}
     <GlassNav className="gap-4 sm:h-16" headerClassName={cn(onProduct && "max-md:hidden")}>
-        <Logo href="/dashboard" />
+        <Logo href="/home" />
 
         <nav className="ml-4 hidden items-center gap-1 md:flex" aria-label="Main">
           {NAV.map(({ href, label }) => (
@@ -127,7 +131,7 @@ export function MobileTabBar({ unreadAlerts, collections }: { unreadAlerts: numb
   // Product pages pin their own action bar in this spot.
   if (pathname.startsWith("/products/")) return null;
 
-  const tab = (item: (typeof NAV)[number]) => {
+  const tab = (item: (typeof TABS)[number]) => {
     const { href, label, icon: Icon } = item;
     const active = isActive(href);
     return (
@@ -157,7 +161,7 @@ export function MobileTabBar({ unreadAlerts, collections }: { unreadAlerts: numb
         aria-label="Main"
       >
         <ul className="flex">
-          {NAV.slice(0, 2).map(tab)}
+          {TABS.slice(0, 2).map(tab)}
           <li className="min-w-0 flex-1">
             <button
               type="button"
@@ -171,7 +175,7 @@ export function MobileTabBar({ unreadAlerts, collections }: { unreadAlerts: numb
               Track
             </button>
           </li>
-          {NAV.slice(2).map(tab)}
+          {TABS.slice(2).map(tab)}
         </ul>
       </nav>
       <TrackSheet open={trackOpen} onOpenChange={setTrackOpen} collections={collections} />

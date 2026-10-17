@@ -45,6 +45,7 @@ export type DashboardProduct = ProductRow & {
   /** Up to 30 most recent prices for the card sparkline. */
   spark: number[];
   verdict: ItemInsightRow["verdict"] | null;
+  verdictConfidence: number | null;
   /** How many users track this product (shared price data). */
   shoppers: number;
   /** Whether the crossed-out list price was ever really charged. */
@@ -123,7 +124,7 @@ function statusOf(created: string, current: number, firstPrice: number, points: 
 
 type ItemWithRelations = CatalogItemRow & {
   priceHistory: PricePoint[];
-  insight: Pick<ItemInsightRow, "verdict"> | null;
+  insight: Pick<ItemInsightRow, "verdict" | "confidence"> | null;
   offers: StoreOfferRow[];
   trackers: { id: string }[];
 };
@@ -156,6 +157,7 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
     trend: insights.trend,
     spark: history.slice(-30).map((h) => h.price),
     verdict: item.insight?.verdict ?? null,
+    verdictConfidence: item.insight?.confidence ?? null,
     shoppers: item.trackers.length,
     discountCheck: evidence.discountCheck,
     bestOffer: evidence.bestOffer
@@ -166,7 +168,7 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
 
 const ITEM_WITH = {
   priceHistory: { columns: { price: true, checked_at: true } },
-  insight: { columns: { verdict: true } },
+  insight: { columns: { verdict: true, confidence: true } },
   offers: true,
   trackers: { columns: { id: true } },
 } as const;
