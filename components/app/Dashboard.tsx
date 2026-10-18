@@ -217,7 +217,7 @@ export default function Dashboard({ products, stats, collections, initialCollect
                   type="button"
                   onClick={() => setFilter(f.value)}
                   className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium max-md:h-10 max-md:px-3.5 max-md:text-[0.8125rem] pointer-coarse:h-10 pointer-coarse:px-4",
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium max-md:h-10 max-md:px-3.5 max-md:text-[0.8125rem] pointer-coarse:h-11 pointer-coarse:px-4",
                     active ? "border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
                   )}
                 >

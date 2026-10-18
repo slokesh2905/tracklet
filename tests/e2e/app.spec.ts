@@ -4,7 +4,9 @@ import { expectNoHorizontalOverflow, isMobile } from "./helpers";
 test.describe("signed in", () => {
   test("dashboard shows stats, filters and product cards", async ({ page }) => {
     await page.goto("/dashboard");
-    await expect(page.getByText("Tracking", { exact: true })).toBeVisible();
+    // Phones fold the stat cards into one summary line under the heading.
+    if (isMobile(page)) await expect(page.getByText(/^\d+ tracked · prices checked/)).toBeVisible();
+    else await expect(page.getByText("Tracking", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: /Sony WH-1000XM5/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /Dyson V12/ })).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -35,33 +37,58 @@ test.describe("signed in", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("product detail shows chart, insights and alert rules", async ({ page }) => {
+  test("product detail shows chart, insights and alert rules", async ({ page }, testInfo) => {
+    // Each device edits a different product, so the parallel runs can't overwrite each other's alert.
+    const name = { iphone: "Apple AirPods Pro", pixel: "Dyson V12" }[testInfo.project.name] ?? "Sony WH-1000XM5";
     await page.goto("/dashboard");
-    await page.getByRole("link", { name: /Sony WH-1000XM5/ }).click();
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Sony WH-1000XM5");
+    await page.getByRole("link", { name: new RegExp(name) }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(name);
     await expect(page.getByText("Deal score", { exact: true })).toBeVisible();
     await expect(page.getByText("All-time low").first()).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
-    const target = page.getByLabel("Alert me when the price is at or below");
-    await target.fill("22000");
-    await page.getByRole("button", { name: "Save alert" }).click();
+    if (!isMobile(page)) {
+      const target = page.getByLabel("Alert me when the price is at or below");
+      await target.fill("22000");
+      await page.getByRole("button", { name: "Save alert" }).click();
+      await expect(page.getByText("Alert rules saved")).toBeVisible();
+      await page.reload();
+      await expect(target).toHaveValue("22000");
+      return;
+    }
+
+    // Phones set the alert in a sheet: step the price down, save, and it shows on the page.
+    await page.getByRole("button", { name: "Price alert", exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: "Price alert" });
+    await sheet.getByRole("button", { name: "Lower price" }).click();
+    const value = await sheet.getByText("Alert at or below", { exact: true }).locator("xpath=following-sibling::div").innerText();
+    await sheet.getByRole("button", { name: "Save alert" }).click();
     await expect(page.getByText("Alert rules saved")).toBeVisible();
     await page.reload();
-    await expect(target).toHaveValue("22000");
+    await expect(page.getByText(`Alert at ${value} or below`).first()).toBeVisible();
   });
 
   test("touch targets are at least 44px on phones", async ({ page }) => {
     test.skip(!isMobile(page), "touch sizing applies to coarse pointers");
     await page.goto("/dashboard");
-    const trigger = page.getByRole("button", { name: "Product actions" }).first();
-    const box = await trigger.boundingBox();
-    expect(box?.height).toBeGreaterThanOrEqual(44);
+    // Phones reach card actions by swiping, so check the controls a thumb actually taps.
+    const targets = [
+      page.getByRole("navigation", { name: "Main" }).last().getByRole("link", { name: /Alerts/ }),
+      page.getByRole("tab", { name: /Great deals/ }),
+      page.getByLabel("Search products"),
+      page.getByRole("button", { name: /^Sort/ }),
+    ];
+    for (const target of targets) {
+      const box = await target.first().boundingBox();
+      expect(box?.height, `${target}`).toBeGreaterThanOrEqual(44);
+    }
   });
 
   test("collections and settings pages fit the screen", async ({ page }) => {
     await page.goto("/collections");
-    await expect(page.getByRole("heading", { name: "Home office" })).toBeVisible();
+    // Phones list collections as tappable rows; desktop shows each as a titled card.
+    if (isMobile(page)) await expect(page.getByRole("button", { name: /^Home office/ })).toBeVisible();
+    else await expect(page.getByRole("heading", { name: "Home office" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.goto("/settings");
@@ -81,18 +108,21 @@ test.describe("shared data and useful verdicts from day one", () => {
   test("price history is shared between shoppers tracking the same product", async ({ page }) => {
     await page.goto("/dashboard");
     const sony = page.getByRole("article").filter({ hasText: "Sony WH-1000XM5" });
-    await expect(sony.getByText("2 tracking")).toBeVisible();
+    // A phone card shows at most two badges, and price news outranks the shopper count.
+    if (!isMobile(page)) await expect(sony.getByText("2 tracking")).toBeVisible();
     await sony.getByRole("link", { name: /Sony WH-1000XM5/ }).click();
     await expect(page.getByText(/Price data since .* from 2 shoppers/)).toBeVisible();
   });
 
   test("a verified cheaper listing on another store is shown", async ({ page }) => {
     await page.goto("/dashboard");
-    await expect(page.getByText(/Cheaper on Croma/)).toBeVisible();
+    // Desktop cards carry the cheaper-store badge; phones (two-badge cap) show it on the product page.
+    if (!isMobile(page)) await expect(page.getByText(/Cheaper on Croma/)).toBeVisible();
 
     await page.getByRole("link", { name: /Sony WH-1000XM5/ }).click();
+    if (isMobile(page)) await expect(page.getByRole("link", { name: /less on Croma/ })).toBeVisible();
     const stores = page.getByRole("region", { name: "Other stores" });
-    await expect(stores.getByRole("link", { name: /Croma.*Same item/ })).toBeVisible();
+    await expect(stores.getByRole("link", { name: /Croma.*Exact/ })).toBeVisible();
     await expect(stores.getByText("Similar")).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
