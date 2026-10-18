@@ -2,13 +2,21 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, BellRing, ChevronRight, ImageOff, PiggyBank, Target } from "lucide-react";
 import ClipboardSuggest from "@/components/app/ClipboardSuggest";
+import HomeDesktop from "@/components/app/HomeDesktop";
 import HomeGreeting from "@/components/app/HomeGreeting";
 import HomeHero from "@/components/app/HomeHero";
-import { getAlerts, getDashboardData } from "@/lib/data";
-import { formatPercent, formatPrice, timeAgo } from "@/lib/format";
-import { closestToTarget, heroCards, withoutTarget } from "@/lib/home";
+import PasteTrack from "@/components/app/PasteTrack";
+import { getAlerts, getDashboardData, getPriceHistory } from "@/lib/data";
+import { formatPercent, formatPrice, hostname, timeAgo } from "@/lib/format";
+import { closestToTarget, heroCards, priceWindow, recentlyChanged, withoutTarget, type HeroCard } from "@/lib/home";
 
 export const metadata = { title: "Home" };
+
+/** The desktop's featured deal draws its last 90 days, which the dashboard data doesn't carry. */
+async function windowFor(card: HeroCard) {
+  const history = await getPriceHistory(card.productId);
+  return history ? priceWindow(history, card.price) : null;
+}
 
 export default async function HomePage() {
   const [data, alerts] = await Promise.all([getDashboardData(), getAlerts()]);
@@ -21,28 +29,49 @@ export default async function HomePage() {
   const lastChecked = products.map((p) => p.last_checked_at).filter((t): t is string => !!t).sort().at(-1) ?? null;
   const name = user.name?.trim().split(/\s+/)[0] || user.email.split("@")[0] || "there";
 
+  const featuredWindow = cards[0] ? await windowFor(cards[0]) : null;
+
   const summary =
     products.length === 0
       ? "Track your first product to see what to act on here."
       : `Your ${products.length} product${products.length === 1 ? " was" : "s were"} checked ${lastChecked ? timeAgo(lastChecked) : "recently"}.`;
 
-  // Spacing follows the design screen by screen rather than one uniform gap.
+  // A phone gets one column (design 2a); from 768px up the page spreads out (design 3a).
+  // Spacing follows the designs screen by screen rather than one uniform gap.
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col">
-      <HomeGreeting name={name} summary={summary} />
-      <ClipboardSuggest trackedUrls={products.map((p) => p.url)} />
+    <div className="mx-auto flex w-full max-w-xl flex-col md:max-w-none">
+      <div className="md:flex md:flex-wrap md:items-end md:justify-between md:gap-6 md:pt-3">
+        <HomeGreeting name={name} summary={summary} />
+        <PasteTrack className="max-md:hidden" />
+      </div>
+      <div className="md:hidden">
+        <ClipboardSuggest trackedUrls={products.map((p) => p.url)} />
+      </div>
 
       {products.length === 0 ? (
-        <section className="mt-6 flex flex-col items-center rounded-xl border border-dashed px-6 py-12 text-center">
+        <section className="mt-6 flex flex-col items-center rounded-xl border border-dashed px-6 py-12 text-center md:mt-7">
           <Target className="size-10 text-muted-foreground" />
           <h2 className="mt-3 font-semibold">Nothing tracked yet</h2>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
             <span className="md:hidden">Tap Track below and paste a link from any store.</span>
-            <span className="max-md:hidden">Paste a product link on the Products page to start.</span>
+            <span className="max-md:hidden">Paste a product link above to start.</span>
           </p>
         </section>
       ) : (
         <>
+          <HomeDesktop
+            className="max-md:hidden"
+            cards={cards}
+            featuredWindow={featuredWindow}
+            changed={recentlyChanged(products)}
+            targets={targets}
+            untargeted={untargeted}
+            totalProducts={products.length}
+            stores={new Set(products.map((p) => hostname(p.url))).size}
+            lastChecked={lastChecked}
+            stats={stats}
+          />
+          <div className="flex flex-col md:hidden">
           {cards.length > 0 ? (
             <HomeHero cards={cards} />
           ) : (
@@ -122,6 +151,7 @@ export default async function HomePage() {
           <Link href="/dashboard" className="mt-3.5 flex h-11 items-center justify-center gap-1.5 text-sm font-medium text-muted-foreground">
             See all {products.length} product{products.length === 1 ? "" : "s"} <ArrowRight className="size-[0.9375rem]" />
           </Link>
+          </div>
         </>
       )}
     </div>

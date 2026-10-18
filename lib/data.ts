@@ -46,6 +46,12 @@ export type DashboardProduct = ProductRow & {
   spark: number[];
   verdict: ItemInsightRow["verdict"] | null;
   verdictConfidence: number | null;
+  /** The AI's one-paragraph reasoning behind the verdict. */
+  verdictSummary: string | null;
+  /** The most recent price change: when, and the price before it. */
+  lastChange: { at: string; from: number } | null;
+  /** Prices over the last 30 days, starting with the one in effect 30 days ago. */
+  trend30: number[];
   /** How many users track this product (shared price data). */
   shoppers: number;
   /** Whether the crossed-out list price was ever really charged. */
@@ -124,7 +130,7 @@ function statusOf(created: string, current: number, firstPrice: number, points: 
 
 type ItemWithRelations = CatalogItemRow & {
   priceHistory: PricePoint[];
-  insight: Pick<ItemInsightRow, "verdict" | "confidence"> | null;
+  insight: (Pick<ItemInsightRow, "verdict" | "confidence"> & Partial<Pick<ItemInsightRow, "summary">>) | null;
   offers: StoreOfferRow[];
   trackers: { id: string }[];
 };
@@ -146,6 +152,21 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
     now,
   });
 
+  // History rows are readings; a change is a reading whose price differs from the one before.
+  let lastChange: DashboardProduct["lastChange"] = null;
+  for (let i = history.length - 1; i > 0; i--) {
+    if (history[i]!.price !== history[i - 1]!.price) {
+      lastChange = { at: history[i]!.checked_at, from: history[i - 1]!.price };
+      break;
+    }
+  }
+  const since = now - 30 * DAY_MS;
+  const before = history.filter((h) => new Date(h.checked_at).getTime() < since).at(-1);
+  const trend30 = [
+    ...(before ? [before.price] : []),
+    ...history.filter((h) => new Date(h.checked_at).getTime() >= since).map((h) => h.price),
+  ];
+
   return {
     ...flatten(tracking, item),
     status: statusOf(tracking.created_at, item.current_price, firstPrice, history.length, now),
@@ -158,6 +179,9 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
     spark: history.slice(-30).map((h) => h.price),
     verdict: item.insight?.verdict ?? null,
     verdictConfidence: item.insight?.confidence ?? null,
+    verdictSummary: item.insight?.summary ?? null,
+    lastChange,
+    trend30: trend30.length > 0 ? trend30 : [item.current_price],
     shoppers: item.trackers.length,
     discountCheck: evidence.discountCheck,
     bestOffer: evidence.bestOffer
@@ -168,7 +192,7 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
 
 const ITEM_WITH = {
   priceHistory: { columns: { price: true, checked_at: true } },
-  insight: { columns: { verdict: true, confidence: true } },
+  insight: { columns: { verdict: true, confidence: true, summary: true } },
   offers: true,
   trackers: { columns: { id: true } },
 } as const;
@@ -278,6 +302,23 @@ export async function getProductDetail(id: string) {
 }
 
 export type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProductDetail>>>;
+
+/** One tracked product's price history, oldest first, or null if it isn't the user's. */
+export async function getPriceHistory(productId: string) {
+  const user = await getUser();
+  if (!user) return null;
+  const row = await db.query.products.findFirst({
+    columns: { id: true },
+    where: and(eq(products.id, productId), eq(products.user_id, user.id)),
+    with: {
+      item: {
+        columns: { id: true },
+        with: { priceHistory: { columns: { price: true, checked_at: true }, orderBy: asc(priceHistory.checked_at) } },
+      },
+    },
+  });
+  return row?.item.priceHistory ?? null;
+}
 
 export async function getAlerts() {
   const user = await getUser();

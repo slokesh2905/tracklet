@@ -263,6 +263,60 @@ async function ownedItem(productId: string, userId: string) {
   return row?.item ?? null;
 }
 
+/** Read an item's page now and run the reading through the usual price pipeline. */
+async function checkItem(item: CatalogItemRow) {
+  let scraped;
+  try {
+    scraped = await makeScraper().scrape(item.url);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Couldn't read that page" };
+  }
+  const pipelineItem = (await loadPipelineItem(item.id)) ?? toPipelineItem(item);
+  return processReading(pipelineItem, scraped, createDbPipelineStore());
+}
+
+/** Pages read at once by "Check now" for everything; enough to be quick, gentle on the stores. */
+const CHECK_ALL_CONCURRENCY = 3;
+
+/**
+ * Home's "Check now": re-reads every tracked product not checked in the last hour (the same
+ * rule as a single product's Check now), skipping paused ones, which have their own Resume.
+ */
+export async function refreshAllProducts(): Promise<ActionResult<{ checked: number; changed: number; failed: number }>> {
+  const user = await getUser();
+  if (!user) return fail("Please sign in first");
+
+  const rows = await db.query.products.findMany({
+    columns: { id: true },
+    where: eq(products.user_id, user.id),
+    with: { item: true },
+  });
+  const due = rows.map((r) => r.item).filter((item) => !item.paused && !isFresh(item, MANUAL_CHECK_MIN_MS));
+  if (due.length === 0) return { ok: true, checked: 0, changed: 0, failed: 0, message: "Prices are up to date (checked within the last hour)" };
+
+  let changed = 0;
+  let failed = 0;
+  const queue = [...due];
+  await Promise.all(
+    Array.from({ length: Math.min(CHECK_ALL_CONCURRENCY, queue.length) }, async () => {
+      for (let item = queue.shift(); item; item = queue.shift()) {
+        const read = await checkItem(item);
+        if ("error" in read || read.outcome === "rejected") failed++;
+        else if (read.outcome === "changed") changed++;
+      }
+    })
+  );
+
+  revalidateApp();
+  const message =
+    changed > 0
+      ? `${changed} price${changed === 1 ? "" : "s"} changed`
+      : failed === due.length
+        ? "We couldn't read the stores right now"
+        : "No new changes since the last check";
+  return { ok: true, checked: due.length, changed, failed, message };
+}
+
 export async function refreshProduct(productId: string): Promise<ActionResult> {
   if (!uuidSchema.safeParse(productId).success) return fail("Invalid product");
   const user = await getUser();
@@ -272,14 +326,9 @@ export async function refreshProduct(productId: string): Promise<ActionResult> {
   if (!item) return fail("Product not found");
   if (isFresh(item, MANUAL_CHECK_MIN_MS)) return { ok: true, message: "Price is up to date (checked within the last hour)" };
 
-  let scraped;
-  try {
-    scraped = await makeScraper().scrape(item.url);
-  } catch (error) {
-    return fail(error instanceof Error ? error.message : "Couldn't read that page");
-  }
-  const pipelineItem = (await loadPipelineItem(item.id)) ?? toPipelineItem(item);
-  const { outcome } = await processReading(pipelineItem, scraped, createDbPipelineStore());
+  const read = await checkItem(item);
+  if ("error" in read) return fail(read.error);
+  const { outcome } = read;
 
   revalidateApp();
   revalidatePath(`/products/${productId}`);

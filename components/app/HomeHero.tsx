@@ -8,7 +8,7 @@ import { formatPercent, formatPrice, hostname, timeAgo } from "@/lib/format";
 import type { HeroCard, HeroKind } from "@/lib/home";
 import { cn } from "@/lib/utils";
 
-const TAGS: Record<HeroKind, { label: string; icon: LucideIcon; className: string }> = {
+export const TAGS: Record<HeroKind, { label: string; icon: LucideIcon; className: string }> = {
   target_reached: { label: "Target reached", icon: Target, className: "bg-primary/12 text-primary" },
   all_time_low: { label: "New all-time low", icon: Trophy, className: "bg-primary/12 text-primary" },
   price_drop: { label: "Price drop", icon: TrendingDown, className: "bg-success/12 text-success" },

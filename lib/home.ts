@@ -1,6 +1,7 @@
 import type { DashboardProduct } from "@/lib/data";
 import type { AlertKind } from "@/lib/db/schema";
 import { DAY_MS, percentChange } from "@/lib/format";
+import { clip, toSteps, windowStats, type PricePoint } from "@/lib/insights";
 
 /** Only alerts this recent are still "worth a look". */
 const RECENT_DAYS = 14;
@@ -33,8 +34,10 @@ export type HeroCard = {
   at: string;
   spark: number[];
   target: number | null;
+  alertPct: number | null;
   verdict: DashboardProduct["verdict"];
   confidence: number | null;
+  verdictSummary: string | null;
 };
 
 export type TargetRow = {
@@ -91,8 +94,10 @@ export function heroCards(products: DashboardProduct[], alerts: HomeAlert[], now
         at: a.created_at,
         spark: p.spark,
         target: num(p.target_price),
+        alertPct: num(p.alert_pct),
         verdict: p.verdict,
         confidence: p.verdictConfidence,
+        verdictSummary: p.verdictSummary,
       };
     });
 }
@@ -123,4 +128,59 @@ export function closestToTarget(products: DashboardProduct[]): TargetRow[] {
 /** Products with no price target, which Home nudges the user to set. */
 export function withoutTarget(products: DashboardProduct[]) {
   return products.filter((p) => p.target_price === null).length;
+}
+
+export type PriceWindow = {
+  /** Price steps from `days` ago to now: each price holds until the next point. */
+  steps: Array<{ t: number; price: number }>;
+  since: number;
+  /** "Now" for this window: where today's price sits on the chart. */
+  until: number;
+  low: number;
+  high: number;
+  /** Time-weighted, so a price that held for weeks counts for more than a one-day blip. */
+  average: number;
+};
+
+/** The last `days` of a price history, for the desktop's featured chart. */
+export function priceWindow(history: PricePoint[], currentPrice: number, now = Date.now(), days = 90): PriceWindow {
+  const since = now - days * DAY_MS;
+  const steps = clip(toSteps(history, currentPrice, now), since);
+  return { steps, since, until: now, ...windowStats(steps, now) };
+}
+
+export type ChangedRow = {
+  productId: string;
+  name: string;
+  url: string;
+  imageUrl: string | null;
+  currency: string;
+  price: number;
+  /** The last change, in percent of the price before it. */
+  changePct: number;
+  changedAt: string;
+  trend: number[];
+};
+
+/** Products whose price moved in the last `days`, most recent first. */
+export function recentlyChanged(products: DashboardProduct[], now = Date.now(), days = 7): ChangedRow[] {
+  return products
+    .flatMap((p) => {
+      const change = p.lastChange;
+      if (!change || now - new Date(change.at).getTime() > days * DAY_MS) return [];
+      return [
+        {
+          productId: p.id,
+          name: p.name,
+          url: p.url,
+          imageUrl: p.image_url,
+          currency: p.currency,
+          price: p.current_price,
+          changePct: percentChange(change.from, p.current_price),
+          changedAt: change.at,
+          trend: p.trend30,
+        },
+      ];
+    })
+    .sort((a, b) => b.changedAt.localeCompare(a.changedAt));
 }

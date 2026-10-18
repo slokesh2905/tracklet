@@ -20,10 +20,10 @@ export default function HomeGreeting({ name, summary }: { name: string; summary:
   return (
     <header>
       <p className="h-[1.0625rem] text-[0.8125rem] text-muted-foreground">{date}</p>
-      <h1 className="mt-0.5 text-[1.75rem] leading-tight font-bold tracking-tight">
+      <h1 className="mt-0.5 text-[1.75rem] leading-tight font-bold tracking-tight md:mt-1 md:text-[2rem]">
         {part ? `Good ${part}, ${name}` : `Hello, ${name}`}
       </h1>
-      <p className="mt-1 text-sm text-muted-foreground" suppressHydrationWarning>
+      <p className="mt-1 text-sm text-muted-foreground md:mt-1.5 md:text-[0.9375rem]" suppressHydrationWarning>
         {summary}
       </p>
     </header>

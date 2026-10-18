@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CircleCheck, Clipboard, X } from "lucide-react";
-import { toast } from "sonner";
-import { addProduct, deleteProduct } from "@/app/actions/products";
 import { readClipboardLinkQuietly } from "@/lib/clipboard";
+import { useQuickTrack } from "@/lib/use-quick-track";
 import { normalizeProductUrl } from "@/lib/validation";
 
 const DISMISSED_KEY = "tracklet:clipboard-dismissed";
@@ -33,16 +32,13 @@ const canonical = (url: string) => {
   }
 };
 
-type Added = { productId: string | null; undone: boolean };
-
 /**
  * "Track the link you copied?" on Home. Only shown when the browser lets us read the clipboard
  * without a prompt, the link isn't tracked already, and it wasn't waved away before.
  */
 export default function ClipboardSuggest({ trackedUrls }: { trackedUrls: string[] }) {
   const [link, setLink] = useState<string | null>(null);
-  const [state, setState] = useState<"ask" | "done">("ask");
-  const added = useRef<Added | null>(null);
+  const quick = useQuickTrack();
   const tracked = useMemo(() => new Set(trackedUrls.map(canonical)), [trackedUrls]);
 
   useEffect(() => {
@@ -68,30 +64,8 @@ export default function ClipboardSuggest({ trackedUrls }: { trackedUrls: string[
 
   function track() {
     if (!link) return;
-    const entry: Added = { productId: null, undone: false };
-    added.current = entry;
     rememberDismissed(link);
-    // Show the result right away: adding reads the page, which is the first price check.
-    setState("done");
-    void addProduct(link).then((result) => {
-      if (!result.ok) {
-        if (added.current === entry) setState("ask");
-        toast.error(result.error);
-        return;
-      }
-      entry.productId = result.updated ? null : result.productId;
-      if (entry.undone && entry.productId) void deleteProduct(entry.productId);
-    });
-  }
-
-  function undo() {
-    const entry = added.current;
-    added.current = null;
-    setState("ask");
-    if (!entry) return;
-    entry.undone = true;
-    // Still adding: the delete runs once the add returns (see track).
-    if (entry.productId) void deleteProduct(entry.productId);
+    quick.track(link);
   }
 
   function dismiss() {
@@ -99,14 +73,14 @@ export default function ClipboardSuggest({ trackedUrls }: { trackedUrls: string[
     setLink(null);
   }
 
-  if (state === "done") {
+  if (quick.added) {
     return (
       <div className="mt-4 flex items-center gap-3 rounded-xl border border-success/20 bg-success/8 py-2 pr-1 pl-3" role="status">
         <CircleCheck className="size-5 shrink-0 text-success" />
         <p className="min-w-0 flex-1 text-sm leading-snug">
           <b className="font-semibold">Added to Products.</b> The first price check is running.
         </p>
-        <button type="button" onClick={undo} className="h-11 shrink-0 px-3 text-sm font-medium text-primary">
+        <button type="button" onClick={quick.undo} className="h-11 shrink-0 px-3 text-sm font-medium text-primary">
           Undo
         </button>
       </div>

@@ -274,7 +274,7 @@ export default function ProductCard({ product, collections }: Props) {
               <Sparkline
                 values={product.spark}
                 dot
-                className={`ml-auto shrink-0 md:hidden ${product.status === "new" ? "text-chart-2" : ""}`}
+                className={`ml-auto w-15 shrink-0 md:hidden ${product.status === "new" ? "text-chart-2" : ""}`}
               />
             </div>
           </div>

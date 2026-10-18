@@ -50,7 +50,7 @@ export function toSteps(history: PricePoint[], currentPrice: number, now: number
 type Step = { price: number; t: number };
 
 /** Steps clipped to [since, now], including the price that was in effect at `since`. */
-function clip(steps: Step[], since: number): Step[] {
+export function clip(steps: Step[], since: number): Step[] {
   const inside = steps.filter((s) => s.t >= since);
   const before = steps.filter((s) => s.t < since).at(-1);
   return before ? [{ price: before.price, t: since }, ...inside] : inside;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DashboardProduct } from "@/lib/data";
 import { DAY_MS } from "@/lib/format";
-import { closestToTarget, heroCards, withoutTarget, type HomeAlert } from "@/lib/home";
+import { closestToTarget, heroCards, priceWindow, recentlyChanged, withoutTarget, type HomeAlert } from "@/lib/home";
 
 const NOW = Date.UTC(2026, 9, 17);
 const daysAgo = (d: number) => new Date(NOW - d * DAY_MS).toISOString();
@@ -81,5 +81,41 @@ describe("closestToTarget", () => {
 describe("withoutTarget", () => {
   it("counts products with no target", () => {
     expect(withoutTarget([product("a"), product("b", { target_price: 10 }), product("c")])).toBe(2);
+  });
+});
+
+describe("priceWindow", () => {
+  it("starts at the price in effect when the window opens and weights the average by time", () => {
+    const w = priceWindow(
+      [
+        { price: 2000, checked_at: daysAgo(120) },
+        { price: 1600, checked_at: daysAgo(60) },
+        { price: 1400, checked_at: daysAgo(30) },
+      ],
+      1400,
+      NOW
+    );
+    expect(w.steps[0]).toEqual({ t: NOW - 90 * DAY_MS, price: 2000 });
+    expect(w.low).toBe(1400);
+    expect(w.high).toBe(2000);
+    // 30 days at 2000, 30 at 1600, 30 at 1400.
+    expect(w.average).toBeCloseTo(1666.7, 1);
+  });
+});
+
+describe("recentlyChanged", () => {
+  it("lists last week's changes, newest first, with the size of the last move", () => {
+    const rows = recentlyChanged(
+      [
+        product("old", { lastChange: { at: daysAgo(9), from: 1100 } }),
+        product("a", { lastChange: { at: daysAgo(4), from: 1250 } }),
+        product("b", { lastChange: { at: daysAgo(1), from: 900 } }),
+        product("never", { lastChange: null }),
+      ],
+      NOW
+    );
+    expect(rows.map((r) => r.productId)).toEqual(["b", "a"]);
+    expect(rows[0]!.changePct).toBeCloseTo(11.1, 1);
+    expect(rows[1]!.changePct).toBeCloseTo(-20, 1);
   });
 });

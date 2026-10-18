@@ -4,14 +4,17 @@ import { cn } from "@/lib/utils";
 export default function Sparkline({
   values,
   dot = false,
+  width = 64,
   className,
 }: {
   values: number[];
   /** The phone card's 64×24 version: undistorted, with today's price as a dot at the end. */
   dot?: boolean;
+  /** Width of the dot version, in pixels. */
+  width?: number;
   className?: string;
 }) {
-  if (dot && values.length > 0) return <DotSparkline values={values} className={className} />;
+  if (dot && values.length > 0) return <DotSparkline values={values} width={width} className={className} />;
   if (values.length < 2) {
     return <div className={cn("h-8", className)} aria-hidden="true" />;
   }
@@ -46,8 +49,7 @@ export default function Sparkline({
   );
 }
 
-function DotSparkline({ values, className }: { values: number[]; className?: string }) {
-  const w = 64;
+function DotSparkline({ values, width: w, className }: { values: number[]; width: number; className?: string }) {
   const h = 24;
   const v = values.length > 1 ? values : [values[0]!, values[0]!];
   const min = Math.min(...v);
@@ -66,7 +68,9 @@ function DotSparkline({ values, className }: { values: number[]; className?: str
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
-      className={cn("h-6 w-15 overflow-visible", down ? "text-success" : up ? "text-danger" : "text-muted-foreground", className)}
+      width={w}
+      height={h}
+      className={cn("h-6 overflow-visible", down ? "text-success" : up ? "text-danger" : "text-muted-foreground", className)}
       aria-hidden="true"
     >
       <polyline points={points.join(" ")} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
