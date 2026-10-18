@@ -12,10 +12,14 @@ import {
   YAxis,
 } from "recharts";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DAY_MS, formatDate, formatPercent, formatPrice, percentChange } from "@/lib/format";
+import { DAY_MS, formatDate, formatMonth, formatPercent, formatPrice, percentChange } from "@/lib/format";
+import { clip, toSteps, type PricePoint } from "@/lib/insights";
 import { cn } from "@/lib/utils";
 
-export type ChartPoint = { price: number; checked_at: string };
+export type ChartPoint = PricePoint;
+
+/** A chart row: `price` draws the tracked line, `archived` an archived sighting's dot, `gap` marks a break. */
+type Row = { t: number; price: number | null; archived: number | null; gap?: true };
 
 const RANGES = [
   { value: "7", label: "7D", days: 7 },
@@ -44,6 +48,8 @@ type Props = {
 /**
  * Prices are a step function (a price holds until it changes), so the chart uses
  * stepAfter and extends the last price to "now" instead of drawing slopes between checks.
+ * Where nobody was checking, the line breaks rather than pretending the price held, and
+ * prices read from Internet Archive snapshots show as loose dots before the line starts.
  */
 export default function PriceChart({
   history,
@@ -60,26 +66,38 @@ export default function PriceChart({
   const [range, setRange] = useState<RangeValue>("all");
   const [now] = useState(() => Date.now());
 
-  const data = useMemo(() => {
-    const points = history
-      .map((p) => ({ t: new Date(p.checked_at).getTime(), price: Number(p.price) }))
-      .sort((a, b) => a.t - b.t);
-    if (points.length === 0 || points.at(-1)!.price !== currentPrice) {
-      points.push({ t: now, price: currentPrice });
-    }
-
+  const { data, hasGap, hasArchived } = useMemo(() => {
     const days = RANGES.find((r) => r.value === range)!.days;
     const since = Number.isFinite(days) ? now - days * DAY_MS : -Infinity;
-    const inside = points.filter((p) => p.t >= since);
-    const before = points.filter((p) => p.t < since).at(-1);
-    const clipped = before ? [{ t: since, price: before.price }, ...inside] : inside;
+    const steps = toSteps(history, currentPrice, now);
+    const live = clip(
+      steps.filter((s) => !s.archived),
+      since
+    );
+
+    const rows: Row[] = steps.filter((s) => s.archived && s.t >= since).map((s) => ({ t: s.t, price: null, archived: s.price }));
+    let gap = false;
+    live.forEach((s, i) => {
+      rows.push({ t: s.t, price: s.price, archived: null });
+      const next = live[i + 1];
+      // Nobody checked between `until` and the next reading: end the line there and leave a gap.
+      if (next && s.until !== undefined && s.until < next.t) {
+        gap = true;
+        rows.push({ t: s.until, price: s.price, archived: null }, { t: s.until + 1, price: null, archived: null, gap: true });
+      }
+    });
     // Extend to today so a flat recent price is visible.
-    const last = clipped.at(-1)!;
-    return last.t < now ? [...clipped, { t: now, price: last.price }] : clipped;
+    const last = live.at(-1);
+    if (last && last.t < now) rows.push({ t: now, price: last.price, archived: null });
+    rows.sort((a, b) => a.t - b.t);
+    return { data: rows, hasGap: gap, hasArchived: rows.some((r) => r.archived !== null) };
   }, [history, currentPrice, range, now]);
 
-  const first = data[0]?.price ?? currentPrice;
-  const prices = data.map((d) => d.price);
+  const valueOf = (r: Row) => r.price ?? r.archived;
+  // Archived sightings can stretch the axis over years; then label months with their year.
+  const spansYears = data.length > 1 && data.at(-1)!.t - data[0]!.t > 300 * DAY_MS;
+  const first = data.map(valueOf).find((v): v is number => v !== null) ?? currentPrice;
+  const prices = data.map(valueOf).filter((v): v is number => v !== null);
   const refs = [targetPrice, lowestPrice].filter((v): v is number => typeof v === "number");
   const min = Math.min(...prices, ...refs);
   const max = Math.max(...prices, ...refs);
@@ -136,7 +154,7 @@ export default function PriceChart({
               type="number"
               scale="time"
               domain={["dataMin", "dataMax"]}
-              tickFormatter={(t: number) => formatDate(new Date(t), { year: false })}
+              tickFormatter={(t: number) => (spansYears ? formatMonth(new Date(t)) : formatDate(new Date(t), { year: false }))}
               tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
               tickLine={false}
               axisLine={false}
@@ -154,15 +172,25 @@ export default function PriceChart({
               isAnimationActive={false}
               cursor={{ stroke: "var(--color-muted-foreground)", strokeDasharray: "3 3" }}
               content={({ active, payload }) => {
-                const point = payload?.[0]?.payload as { t: number; price: number } | undefined;
+                const point = payload?.[0]?.payload as Row | undefined;
                 if (!active || !point) return null;
-                const change = percentChange(first, point.price);
+                const value = valueOf(point);
+                if (value === null) {
+                  return (
+                    <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-md">
+                      <p className="text-muted-foreground">{formatDate(new Date(point.t))}</p>
+                      <p className="mt-0.5 text-popover-foreground">Not tracked: price unknown</p>
+                    </div>
+                  );
+                }
+                const change = percentChange(first, value);
                 return (
                   <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-md">
                     <p className="text-muted-foreground">{formatDate(new Date(point.t))}</p>
                     <p className="mt-0.5 text-sm font-semibold text-popover-foreground">
-                      {formatPrice(point.price, currency)}
+                      {formatPrice(value, currency)}
                     </p>
+                    {point.archived !== null && <p className="text-muted-foreground">From an Internet Archive snapshot</p>}
                     {change !== 0 && (
                       <p className={change < 0 ? "text-success" : "text-danger"}>
                         {formatPercent(change, { signed: true })} vs range start
@@ -206,9 +234,30 @@ export default function PriceChart({
               activeDot={{ r: 5, strokeWidth: 0, fill: "var(--color-primary)" }}
               isAnimationActive={false}
             />
+            {hasArchived && (
+              <Area
+                dataKey="archived"
+                stroke="none"
+                fill="none"
+                dot={{ r: 3.5, strokeWidth: 0, fill: "var(--color-muted-foreground)" }}
+                activeDot={{ r: 5, strokeWidth: 0, fill: "var(--color-muted-foreground)" }}
+                isAnimationActive={false}
+              />
+            )}
           </AreaChart>
         </ResponsiveContainer>
       </div>
+      {(hasArchived || hasGap) && (
+        <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {hasArchived && (
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden className="size-2 rounded-full bg-muted-foreground" />
+              Earlier prices from Internet Archive snapshots
+            </span>
+          )}
+          {hasGap && <span>Breaks in the line: nobody was tracking it then</span>}
+        </p>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import type { DashboardProduct } from "@/lib/data";
 import type { AlertKind } from "@/lib/db/schema";
 import { DAY_MS, percentChange } from "@/lib/format";
-import { clip, toSteps, windowStats, type PricePoint } from "@/lib/insights";
+import { clip, liveHistory, toSteps, windowStats, type PricePoint } from "@/lib/insights";
 
 /** Only alerts this recent are still "worth a look". */
 const RECENT_DAYS = 14;
@@ -145,7 +145,8 @@ export type PriceWindow = {
 /** The last `days` of a price history, for the desktop's featured chart. */
 export function priceWindow(history: PricePoint[], currentPrice: number, now = Date.now(), days = 90): PriceWindow {
   const since = now - days * DAY_MS;
-  const steps = clip(toSteps(history, currentPrice, now), since);
+  // A one-off archived sighting can't be drawn as a step; this chart only shows what we tracked.
+  const steps = clip(toSteps(liveHistory(history), currentPrice, now), since);
   return { steps, since, until: now, ...windowStats(steps, now) };
 }
 

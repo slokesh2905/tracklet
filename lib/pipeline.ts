@@ -6,6 +6,18 @@ import type { ScrapedProduct, Scraper } from "@/lib/scraper";
 /** After this many consecutive failures an item stops being auto-checked. */
 export const MAX_FAILURES = 5;
 
+/**
+ * Readings further apart than this leave the price in between unknown. Tracked items are read daily
+ * and watched (untracked) ones weekly, so either cadence stays continuous; a longer silence is a gap.
+ */
+export const GAP_MS = 8 * 24 * 60 * 60 * 1000;
+
+/** Where a gap before this reading starts (the last accepted reading), or null if there was none. */
+export function readingGap(lastReadAt: string | null, now: number): string | null {
+  if (!lastReadAt) return null;
+  return now - new Date(lastReadAt).getTime() > GAP_MS ? lastReadAt : null;
+}
+
 export type PipelineItem = Pick<
   CatalogItemRow,
   | "id"
@@ -19,6 +31,7 @@ export type PipelineItem = Pick<
   | "lowest_price"
   | "pending_price"
   | "fail_count"
+  | "last_read_at"
 >;
 
 export type Tracker = Pick<TrackingRow, "id" | "user_id" | "target_price" | "alert_pct">;
@@ -35,8 +48,15 @@ export type AlertEvent = {
 export interface PipelineStore {
   /** Unpaused catalog items, least recently checked first. */
   dueItems(limit: number): Promise<PipelineItem[]>;
-  /** Commit an accepted reading; write history when price or stock changed. Clears any pending price. */
-  saveResult(item: PipelineItem, scraped: ScrapedProduct, opts: { priceChanged: boolean; confirmed: boolean }): Promise<void>;
+  /**
+   * Commit an accepted reading; write history when price or stock changed, or after a gap (so the
+   * history shows where the unknown stretch ends). Clears any pending price.
+   */
+  saveResult(
+    item: PipelineItem,
+    scraped: ScrapedProduct,
+    opts: { priceChanged: boolean; confirmed: boolean; gapFrom: string | null }
+  ): Promise<void>;
   /** Park a surprising reading until the next check confirms it. */
   saveHeld(item: PipelineItem, scraped: ScrapedProduct): Promise<void>;
   saveFailure(item: PipelineItem, message: string, pause: boolean): Promise<void>;
@@ -163,6 +183,48 @@ export async function runPriceCheck(
   return summary;
 }
 
+/** The weekly check of items nobody tracks right now (see `catalog_items.watch_until`). */
+export interface WatchStore extends Omit<PipelineStore, "dueItems"> {
+  /** Untracked, unpaused items inside their watch window that weren't checked this week. */
+  watchedItems(limit: number): Promise<PipelineItem[]>;
+  /** A failed watch read: try again next week, without counting towards pausing the item. */
+  saveMiss(item: PipelineItem): Promise<void>;
+}
+
+/**
+ * Keep a recently previewed or untracked item's history going, so whoever tracks it next sees
+ * recent prices. Runs with a free (direct-fetch-only) scraper: a store that blocks us just misses
+ * a week, it never costs credits. Nobody tracks these items, so no alerts go out.
+ */
+export async function runWatchCheck(
+  scraper: Scraper,
+  store: WatchStore,
+  { batchSize = 50, concurrency = 3, budgetMs = 60_000, now = Date.now }: Pick<RunOptions, "batchSize" | "concurrency" | "budgetMs" | "now"> = {}
+) {
+  const startedAt = now();
+  const items = await store.watchedItems(batchSize);
+  const summary = { checked: 0, misses: 0 };
+
+  await mapWithConcurrency(
+    items,
+    concurrency,
+    async (item) => {
+      let scraped: ScrapedProduct;
+      try {
+        scraped = await scraper.scrape(item.url);
+      } catch {
+        summary.misses++;
+        await store.saveMiss(item);
+        return;
+      }
+      summary.checked++;
+      await processReading(item, scraped, store);
+    },
+    () => now() - startedAt < budgetMs
+  );
+  return summary;
+}
+
 export type ReadingOutcome = "rejected" | "held" | "unchanged" | "changed";
 
 /**
@@ -198,7 +260,8 @@ export async function processReading(
   const oldPrice = item.current_price;
   const priceChanged = oldPrice !== scraped.price;
   const stockChanged = item.in_stock !== scraped.inStock;
-  await store.saveResult(item, scraped, { priceChanged, confirmed: decision.confirmed });
+  const gapFrom = readingGap(item.last_read_at, Date.now());
+  await store.saveResult(item, scraped, { priceChanged, confirmed: decision.confirmed, gapFrom });
   if (priceChanged && summary) summary.priceChanges++;
   if (!priceChanged && !stockChanged) return { outcome: "unchanged" };
 

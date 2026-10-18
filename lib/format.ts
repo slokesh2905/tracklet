@@ -100,6 +100,11 @@ export function formatDate(date: string | Date, { year = true } = {}) {
   });
 }
 
+/** "Aug 2023": for axes that span years, where the day is noise. */
+export function formatMonth(date: string | Date) {
+  return new Date(date).toLocaleDateString(LOCALE, { month: "short", year: "numeric" });
+}
+
 export function hostname(url: string) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");

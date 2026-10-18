@@ -1,5 +1,5 @@
 import { DAY_MS } from "@/lib/format";
-import { toSteps, windowStats, type PricePoint } from "@/lib/insights";
+import { coveredMs, toSteps, windowStats, type PricePoint, type Step } from "@/lib/insights";
 
 /** Under this many tracked days there is nothing to compare the list price against. */
 const MIN_DAYS_TO_JUDGE = 7;
@@ -32,8 +32,6 @@ export type DiscountCheck =
 export function isDiscountFlagged(check: DiscountCheck): boolean {
   return check.status === "unverified" || check.status === "inflated";
 }
-
-type Step = ReturnType<typeof toSteps>[number];
 
 /**
  * The most recent price rise that was undone by the latest drop, if the drop is recent. The history
@@ -74,12 +72,13 @@ export function checkDiscount(input: {
   const { history, currentPrice, originalPrice, now = Date.now() } = input;
   const steps = toSteps(history, currentPrice, now);
 
-  const hike = findHike(steps, now);
+  // Archived sightings are too sparse to time a hike, but they do show what was charged.
+  const hike = findHike(steps.filter((s) => !s.archived), now);
   if (hike) return { status: "inflated", ...hike };
 
   if (!originalPrice || originalPrice <= currentPrice) return { status: "none" };
 
-  const daysTracked = Math.max(0, Math.floor((now - steps[0]!.t) / DAY_MS));
+  const daysTracked = Math.max(0, Math.floor(coveredMs(steps, now) / DAY_MS));
   if (daysTracked < MIN_DAYS_TO_JUDGE) return { status: "unknown", daysTracked };
 
   const { high } = windowStats(steps, now);

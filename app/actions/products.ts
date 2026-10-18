@@ -6,6 +6,7 @@ import { and, asc, count, eq, min, ne } from "drizzle-orm";
 import { fail, type ActionResult } from "@/lib/action-result";
 import { categorizeProduct, generateDealVerdict, isAiEnabled } from "@/lib/ai";
 import { aiModelId } from "@/lib/ai-provider";
+import { backfillFromArchive } from "@/lib/archive";
 import { createItem, findItemByKey, rekeyItem } from "@/lib/catalog";
 import { MANUAL_COMPARE_MIN_MS, runComparison } from "@/lib/comparison-runner";
 import { toStoreOffers } from "@/lib/data";
@@ -13,7 +14,7 @@ import { db } from "@/lib/db";
 import { catalogItems, itemInsights, priceHistory, products, type CatalogItemRow } from "@/lib/db/schema";
 import { serverEnv } from "@/lib/env";
 import { buildEvidence, gateVerdict } from "@/lib/evidence";
-import { computeInsights } from "@/lib/insights";
+import { computeInsights, firstSeenAt, HISTORY_COLUMNS } from "@/lib/insights";
 import { consumeAddQuota, consumeAiQuota, ownsCollection } from "@/lib/ownership";
 import { processReading, type PipelineItem } from "@/lib/pipeline";
 import { createDbPipelineStore, loadPipelineItem } from "@/lib/pipeline-store";
@@ -23,8 +24,10 @@ import { makeScraper } from "@/lib/reader";
 import { getUser } from "@/lib/session";
 import { alertRulesSchema, firstIssue, newAlertRulesSchema, productUrlSchema, uuidSchema } from "@/lib/validation";
 
-/** A catalog item checked this recently is attached as-is: no fetch, no credits. */
+/** A catalog item read this recently is attached as-is: no fetch, no credits. */
 const FRESH_MS = 6 * 60 * 60 * 1000;
+/** A preview re-reads a known item whose last reading is older than this, so it never shows a stale price. */
+const PREVIEW_FRESH_MS = 24 * 60 * 60 * 1000;
 /** "Check now" re-reads an item at most this often (shared by everyone tracking it). */
 const MANUAL_CHECK_MIN_MS = 60 * 60 * 1000;
 
@@ -37,8 +40,11 @@ function revalidateApp() {
 /** Scopes a tracking row to its owner; every write below goes through this. */
 const owned = (productId: string, userId: string) => and(eq(products.id, productId), eq(products.user_id, userId));
 
-const isFresh = (item: Pick<CatalogItemRow, "last_checked_at">, ms: number) =>
-  Boolean(item.last_checked_at) && Date.now() - new Date(item.last_checked_at!).getTime() < ms;
+const within = (at: string | null, ms: number) => Boolean(at) && Date.now() - new Date(at!).getTime() < ms;
+/** Checked (attempted) recently: for rate limits. */
+const isFresh = (item: Pick<CatalogItemRow, "last_checked_at">, ms: number) => within(item.last_checked_at, ms);
+/** Read successfully recently: the stored price can be trusted as current. */
+const isReadRecently = (item: Pick<CatalogItemRow, "last_read_at">, ms: number) => within(item.last_read_at, ms);
 
 const toPipelineItem = (i: CatalogItemRow): PipelineItem => ({
   id: i.id,
@@ -52,9 +58,10 @@ const toPipelineItem = (i: CatalogItemRow): PipelineItem => ({
   lowest_price: i.lowest_price,
   pending_price: i.pending_price,
   fail_count: i.fail_count,
+  last_read_at: i.last_read_at,
 });
 
-/** Background work after a new catalog item appears: category + cross-store prices. */
+/** Background work after a new catalog item appears: category, older prices from the archive, cross-store prices. */
 function enrichInBackground(item: CatalogItemRow) {
   after(async () => {
     if (!item.category && isAiEnabled()) {
@@ -65,6 +72,7 @@ function enrichInBackground(item: CatalogItemRow) {
         console.error("Categorize failed:", err);
       }
     }
+    if (!item.archived_at) await backfillFromArchive(item.id);
     await runComparison(item);
   });
 }
@@ -128,9 +136,9 @@ export type ProductPreview = {
 
 /**
  * Read a product so the user can confirm it (and set an alert) before tracking it. A known product
- * is returned as stored, costing nothing. An unknown one is read once and added to the shared
- * catalog, which nobody checks until someone tracks it; adding it afterwards then finds it fresh,
- * so the price is never re-read and never taken from the client.
+ * read in the last day is returned as stored, costing nothing; an older one (nobody has tracked it
+ * lately) is re-read first. An unknown one is read once and added to the shared catalog. Either way
+ * adding it afterwards finds it fresh, so the price is never re-read and never taken from the client.
  */
 export async function previewProduct(rawUrl: string): Promise<ActionResult<{ preview: ProductPreview }>> {
   const parsed = productUrlSchema.safeParse(rawUrl);
@@ -140,10 +148,11 @@ export async function previewProduct(rawUrl: string): Promise<ActionResult<{ pre
 
   const resolved = await resolveUrl(parsed.data);
   let item = await findItemByKey(productKeyFromUrl(resolved).key);
-  if (!item) {
-    const read = await readAndStore(user.id, resolved, null);
-    if (!read.ok) return fail(read.error);
-    item = read.item;
+  if (!item || !isReadRecently(item, PREVIEW_FRESH_MS)) {
+    const read = await readAndStore(user.id, resolved, item);
+    if (read.ok) item = read.item;
+    // A stale known item can still be shown (with its last price) if the re-read fails.
+    else if (!item) return fail(read.error);
   }
 
   const [tracking, [others], [first]] = await Promise.all([
@@ -198,7 +207,7 @@ export async function addProduct(
   let item = await findItemByKey(productKeyFromUrl(resolved).key);
   let created = false;
 
-  if (!item || !isFresh(item, FRESH_MS)) {
+  if (!item || !isReadRecently(item, FRESH_MS)) {
     const read = await readAndStore(user.id, resolved, item);
     if (!read.ok) return fail(read.error);
     ({ item, created } = read);
@@ -445,7 +454,7 @@ export async function generateVerdict(productId: string): Promise<ActionResult> 
     with: {
       item: {
         with: {
-          priceHistory: { columns: { price: true, checked_at: true }, orderBy: asc(priceHistory.checked_at) },
+          priceHistory: { columns: HISTORY_COLUMNS, orderBy: asc(priceHistory.checked_at) },
           offers: true,
           trackers: { columns: { id: true } },
         },
@@ -461,7 +470,7 @@ export async function generateVerdict(productId: string): Promise<ActionResult> 
     currency: item.currency,
     originalPrice: item.original_price,
     inStock: item.in_stock,
-    firstSeen: item.priceHistory[0]?.checked_at ?? item.created_at,
+    firstSeen: firstSeenAt(item.priceHistory, item.created_at),
     shoppers: item.trackers.length,
     insights,
     history: item.priceHistory,

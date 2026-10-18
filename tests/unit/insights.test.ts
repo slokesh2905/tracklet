@@ -113,3 +113,53 @@ describe("dealLabel", () => {
     expect(dealLabel(score)).toBe(label);
   });
 });
+
+describe("gaps and archived sightings", () => {
+  // 100 for 10 days, then nobody checked for 60 days, then 50 for the last 10 days.
+  const gapped = [
+    { price: 100, checked_at: daysAgo(80) },
+    { price: 50, checked_at: daysAgo(10), gap_from: daysAgo(70) },
+  ];
+
+  it("ends a step where the gap starts", () => {
+    const steps = toSteps(gapped, 50, NOW);
+    expect(steps[0]).toMatchObject({ price: 100, until: NOW - 70 * DAY_MS });
+    expect(steps[1]!.until).toBeUndefined();
+  });
+
+  it("leaves the unknown stretch out of the average and the days tracked", () => {
+    const i = computeInsights(gapped, 50, NOW);
+    expect(i.allTime.average).toBeCloseTo(75); // 10 days at 100, 10 days at 50
+    expect(i.daysTracked).toBe(20);
+    expect(i.allTime.low).toBe(50);
+    expect(i.allTime.high).toBe(100);
+  });
+
+  it("does not carry a price across a gap into a window", () => {
+    // The 30-day window starts inside the gap, so only the 50 after it is known.
+    expect(computeInsights(gapped, 50, NOW).last30).toEqual({ low: 50, high: 50, average: 50 });
+  });
+
+  it("counts archived prices for the range but not as tracked time", () => {
+    const history = [
+      { price: 120, checked_at: daysAgo(400), source: "archive" },
+      { price: 40, checked_at: daysAgo(200), source: "archive" },
+      { price: 90, checked_at: daysAgo(20) },
+    ];
+    const i = computeInsights(history, 90, NOW);
+    expect(i.allTime.low).toBe(40);
+    expect(i.allTime.high).toBe(120);
+    expect(i.allTime.average).toBeCloseTo(90);
+    expect(i.daysTracked).toBe(20);
+    expect(i.changeFromFirst).toBe(0);
+    expect(i.isAllTimeLow).toBe(false);
+  });
+
+  it("appends today's price after a history that is only archived", () => {
+    const steps = toSteps([{ price: 70, checked_at: daysAgo(30), source: "archive" }], 70, NOW);
+    expect(steps.map((s) => [s.price, s.archived ?? false])).toEqual([
+      [70, true],
+      [70, false],
+    ]);
+  });
+});

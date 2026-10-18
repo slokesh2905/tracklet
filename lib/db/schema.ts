@@ -122,7 +122,8 @@ export const rateLimit = pgTable("rate_limit", {
 
 export type AlertKind = "target_reached" | "price_drop" | "all_time_low" | "back_in_stock";
 export type Verdict = "buy_now" | "wait" | "fair" | "buy_elsewhere";
-export type PriceSource = "add" | "check" | "confirm" | "import";
+/** `archive`: a one-off reading of an Internet Archive snapshot from before we tracked the item. */
+export type PriceSource = "add" | "check" | "confirm" | "import" | "archive";
 export type OfferMatch = "exact" | "similar";
 
 export const collections = pgTable(
@@ -167,10 +168,17 @@ export const catalogItems = pgTable(
     // A surprising reading awaiting a confirming second reading (see lib/price-guard.ts).
     pending_price: money("pending_price"),
     pending_since: isoTimestamp("pending_since"),
+    /** Last attempt, successful or not (rate limits and scheduling). */
     last_checked_at: isoTimestamp("last_checked_at"),
+    /** Last accepted reading: the price is known up to here. */
+    last_read_at: isoTimestamp("last_read_at"),
     last_error: text("last_error"),
     fail_count: integer("fail_count").notNull().default(0),
     paused: boolean("paused").notNull().default(false),
+    /** Nobody tracks it, but it was previewed or untracked recently: keep a weekly free check until then. */
+    watch_until: isoTimestamp("watch_until"),
+    /** When the Internet Archive backfill ran (it runs once per item). */
+    archived_at: isoTimestamp("archived_at"),
     compared_at: isoTimestamp("compared_at"),
     created_at: createdAt(),
     updated_at: isoTimestamp("updated_at").notNull().default(sql`now()`),
@@ -224,6 +232,8 @@ export const priceHistory = pgTable(
     in_stock: boolean("in_stock"),
     source: text("source").$type<PriceSource>().notNull().default("check"),
     checked_at: isoTimestamp("checked_at").notNull().default(sql`now()`),
+    /** Nobody read the price between this and checked_at (the item went unchecked), so it is unknown. */
+    gap_from: isoTimestamp("gap_from"),
   },
   (t) => [
     index("price_history_item_checked_idx").on(t.catalog_item_id, t.checked_at),

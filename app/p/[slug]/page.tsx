@@ -38,7 +38,7 @@ export default async function SharedProductPage({ params }: Params) {
   if (!product) notFound();
 
   const current = Number(product.current_price);
-  const history = product.history.map((h) => ({ price: Number(h.price), checked_at: h.checked_at }));
+  const history = product.history.map((h) => ({ ...h, price: Number(h.price) }));
   const insights = computeInsights(history, current);
 
   return (

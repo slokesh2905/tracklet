@@ -32,7 +32,7 @@ export async function getSharedProduct(slug: string) {
   if (!row) return null;
 
   const history = await db
-    .select({ price: priceHistory.price, checked_at: priceHistory.checked_at })
+    .select({ price: priceHistory.price, checked_at: priceHistory.checked_at, gap_from: priceHistory.gap_from, source: priceHistory.source })
     .from(priceHistory)
     .where(eq(priceHistory.catalog_item_id, row.itemId))
     .orderBy(asc(priceHistory.checked_at));

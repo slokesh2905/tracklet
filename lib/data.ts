@@ -23,7 +23,7 @@ import { isGreatDeal } from "@/lib/deals";
 import type { DiscountCheck } from "@/lib/discount-check";
 import { buildEvidence, gateVerdict, type Evidence, type Gate, type StoreOffer } from "@/lib/evidence";
 import { DAY_MS } from "@/lib/format";
-import { computeInsights, type Insights, type PricePoint } from "@/lib/insights";
+import { computeInsights, firstSeenAt, HISTORY_COLUMNS, liveHistory, type Insights, type PricePoint } from "@/lib/insights";
 import { getUser } from "@/lib/session";
 
 // Every loader here scopes its queries to the signed-in user's tracking rows.
@@ -138,13 +138,15 @@ type ItemWithRelations = CatalogItemRow & {
 export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, now = Date.now()): DashboardProduct {
   const history = [...item.priceHistory].sort((a, b) => a.checked_at.localeCompare(b.checked_at));
   const insights = computeInsights(history, item.current_price, now);
-  const firstPrice = history[0]?.price ?? item.current_price;
+  // Changes, savings and sparklines are about what we tracked, not archived sightings from before.
+  const live = liveHistory(history);
+  const firstPrice = live[0]?.price ?? item.current_price;
   const evidence = buildEvidence({
     currentPrice: item.current_price,
     currency: item.currency,
     originalPrice: item.original_price,
     inStock: item.in_stock,
-    firstSeen: history[0]?.checked_at ?? item.created_at,
+    firstSeen: firstSeenAt(history, item.created_at),
     shoppers: item.trackers.length,
     insights,
     history,
@@ -154,29 +156,29 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
 
   // History rows are readings; a change is a reading whose price differs from the one before.
   let lastChange: DashboardProduct["lastChange"] = null;
-  for (let i = history.length - 1; i > 0; i--) {
-    if (history[i]!.price !== history[i - 1]!.price) {
-      lastChange = { at: history[i]!.checked_at, from: history[i - 1]!.price };
+  for (let i = live.length - 1; i > 0; i--) {
+    if (live[i]!.price !== live[i - 1]!.price) {
+      lastChange = { at: live[i]!.checked_at, from: live[i - 1]!.price };
       break;
     }
   }
   const since = now - 30 * DAY_MS;
-  const before = history.filter((h) => new Date(h.checked_at).getTime() < since).at(-1);
+  const before = live.filter((h) => new Date(h.checked_at).getTime() < since).at(-1);
   const trend30 = [
     ...(before ? [before.price] : []),
-    ...history.filter((h) => new Date(h.checked_at).getTime() >= since).map((h) => h.price),
+    ...live.filter((h) => new Date(h.checked_at).getTime() >= since).map((h) => h.price),
   ];
 
   return {
     ...flatten(tracking, item),
-    status: statusOf(tracking.created_at, item.current_price, firstPrice, history.length, now),
+    status: statusOf(tracking.created_at, item.current_price, firstPrice, live.length, now),
     percentChange: insights.changeFromFirst,
     firstPrice,
     dealScore: insights.dealScore,
     dealLabel: insights.dealLabel,
     isAllTimeLow: insights.isAllTimeLow,
     trend: insights.trend,
-    spark: history.slice(-30).map((h) => h.price),
+    spark: live.slice(-30).map((h) => h.price),
     verdict: item.insight?.verdict ?? null,
     verdictConfidence: item.insight?.confidence ?? null,
     verdictSummary: item.insight?.summary ?? null,
@@ -191,7 +193,7 @@ export function enrichProduct(tracking: TrackingRow, item: ItemWithRelations, no
 }
 
 const ITEM_WITH = {
-  priceHistory: { columns: { price: true, checked_at: true } },
+  priceHistory: { columns: HISTORY_COLUMNS },
   insight: { columns: { verdict: true, confidence: true, summary: true } },
   offers: true,
   trackers: { columns: { id: true } },
@@ -252,7 +254,7 @@ export async function getProductDetail(id: string) {
     with: {
       item: {
         with: {
-          priceHistory: { columns: { price: true, checked_at: true, in_stock: true }, orderBy: asc(priceHistory.checked_at) },
+          priceHistory: { columns: { ...HISTORY_COLUMNS, in_stock: true }, orderBy: asc(priceHistory.checked_at) },
           insight: true,
           offers: true,
           trackers: { columns: { id: true } },
@@ -276,7 +278,7 @@ export async function getProductDetail(id: string) {
     currency: item.currency,
     originalPrice: item.original_price,
     inStock: item.in_stock,
-    firstSeen: history[0]?.checked_at ?? item.created_at,
+    firstSeen: firstSeenAt(history, item.created_at),
     shoppers: item.trackers.length,
     insights,
     history,
@@ -290,7 +292,7 @@ export async function getProductDetail(id: string) {
     product: flatten(tracking, item),
     catalogItemId: item.id,
     comparedAt: item.compared_at,
-    history: history.map((h) => ({ price: h.price, checked_at: h.checked_at })),
+    history: history.map((h) => ({ price: h.price, checked_at: h.checked_at, gap_from: h.gap_from, source: h.source })),
     insights,
     evidence,
     gate,
@@ -313,7 +315,7 @@ export async function getPriceHistory(productId: string) {
     with: {
       item: {
         columns: { id: true },
-        with: { priceHistory: { columns: { price: true, checked_at: true }, orderBy: asc(priceHistory.checked_at) } },
+        with: { priceHistory: { columns: HISTORY_COLUMNS, orderBy: asc(priceHistory.checked_at) } },
       },
     },
   });

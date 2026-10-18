@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { products, userSettings } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { DAY_MS, percentChange } from "@/lib/format";
-import { computeInsights } from "@/lib/insights";
+import { computeInsights, HISTORY_COLUMNS, liveHistory } from "@/lib/insights";
 import { sendEmail } from "@/lib/mailer";
 import { loadRecipient } from "@/lib/pipeline-store";
 
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
       with: {
         item: {
           columns: { name: true, current_price: true, currency: true },
-          with: { priceHistory: { columns: { price: true, checked_at: true } } },
+          with: { priceHistory: { columns: HISTORY_COLUMNS } },
         },
       },
     }),
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     const history = [...p.priceHistory].sort((a, b) => a.checked_at.localeCompare(b.checked_at));
     const insights = computeInsights(history, p.current_price, now);
     // Price in effect a week ago = last history point at or before then.
-    const before = history.filter((h) => new Date(h.checked_at).getTime() <= weekAgo).at(-1);
+    const before = liveHistory(history).filter((h) => new Date(h.checked_at).getTime() <= weekAgo).at(-1);
 
     const items = byUser.get(user_id) ?? [];
     items.push({

@@ -3,7 +3,7 @@ import { and, eq, not, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { alerts, catalogItems, priceHistory, products, pushSubscriptions, user, userSettings } from "@/lib/db/schema";
 import { deliverAlert, type AlertRecipient } from "@/lib/notify";
-import type { PipelineItem, PipelineStore } from "@/lib/pipeline";
+import type { PipelineItem, PipelineStore, WatchStore } from "@/lib/pipeline";
 import { isPushConfigured } from "@/lib/push";
 
 /** A user's email + notification settings (defaults when they never saved settings). */
@@ -46,14 +46,18 @@ const ITEM_COLUMNS = {
   lowest_price: catalogItems.lowest_price,
   pending_price: catalogItems.pending_price,
   fail_count: catalogItems.fail_count,
+  last_read_at: catalogItems.last_read_at,
 };
+
+/** Watched items are re-read at most this often. */
+const WATCH_EVERY = sql`interval '7 days'`;
 
 export async function loadPipelineItem(itemId: string): Promise<PipelineItem | null> {
   const [row] = await db.select(ITEM_COLUMNS).from(catalogItems).where(eq(catalogItems.id, itemId));
   return row ?? null;
 }
 
-export function createDbPipelineStore(): PipelineStore {
+export function createDbPipelineStore(): PipelineStore & WatchStore {
   const recipients = new Map<string, Promise<AlertRecipient>>();
 
   return {
@@ -73,8 +77,29 @@ export function createDbPipelineStore(): PipelineStore {
         .limit(limit);
     },
 
-    async saveResult(item, scraped, { priceChanged, confirmed }) {
+    async watchedItems(limit) {
+      return db
+        .select(ITEM_COLUMNS)
+        .from(catalogItems)
+        .where(
+          and(
+            not(catalogItems.paused),
+            sql`${catalogItems.watch_until} > now()`,
+            sql`not exists (select 1 from ${products} p where p.catalog_item_id = ${catalogItems.id})`,
+            sql`(${catalogItems.last_checked_at} is null or ${catalogItems.last_checked_at} < now() - ${WATCH_EVERY})`
+          )
+        )
+        .orderBy(sql`${catalogItems.last_checked_at} asc nulls first`)
+        .limit(limit);
+    },
+
+    async saveMiss(item) {
+      await db.update(catalogItems).set({ last_checked_at: new Date().toISOString() }).where(eq(catalogItems.id, item.id));
+    },
+
+    async saveResult(item, scraped, { priceChanged, confirmed, gapFrom }) {
       const stockChanged = item.in_stock !== scraped.inStock;
+      const now = new Date().toISOString();
       await db
         .update(catalogItems)
         .set({
@@ -85,19 +110,22 @@ export function createDbPipelineStore(): PipelineStore {
           image_url: item.image_url ?? scraped.imageUrl,
           pending_price: null,
           pending_since: null,
-          last_checked_at: new Date().toISOString(),
+          last_checked_at: now,
+          last_read_at: now,
           last_error: null,
           fail_count: 0,
         })
         .where(eq(catalogItems.id, item.id));
 
-      if (priceChanged || stockChanged) {
+      if (priceChanged || stockChanged || gapFrom) {
         await db.insert(priceHistory).values({
           catalog_item_id: item.id,
           price: scraped.price,
           currency: scraped.currency,
           in_stock: scraped.inStock,
           source: confirmed ? "confirm" : "check",
+          checked_at: now,
+          gap_from: gapFrom,
         });
       }
     },

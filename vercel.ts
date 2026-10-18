@@ -9,6 +9,8 @@ export const config: VercelConfig = {
   crons: [
     // Daily price check (Hobby plan allows one run per day per cron).
     { path: "/api/cron/check-prices", schedule: "0 6 * * *" },
+    // Free history upkeep: weekly re-reads of watched items and Internet Archive backfills.
+    { path: "/api/cron/backfill", schedule: "0 7 * * *" },
     // Weekly digest, Monday morning UTC.
     { path: "/api/cron/weekly-digest", schedule: "0 8 * * 1" },
   ],

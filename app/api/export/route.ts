@@ -19,7 +19,7 @@ export async function GET() {
         columns: { name: true, url: true, currency: true, current_price: true, lowest_price: true, highest_price: true },
         with: {
           priceHistory: {
-            columns: { price: true, checked_at: true, in_stock: true },
+            columns: { price: true, checked_at: true, in_stock: true, source: true },
             orderBy: asc(priceHistory.checked_at),
           },
         },
@@ -32,14 +32,14 @@ export async function GET() {
   for (const p of rows) {
     const history = p.priceHistory.length
       ? p.priceHistory
-      : [{ price: p.current_price, checked_at: p.created_at, in_stock: null }];
+      : [{ price: p.current_price, checked_at: p.created_at, in_stock: null, source: "add" }];
     for (const h of history) {
-      out.push([p.name, p.url, p.currency, h.checked_at, h.price, h.in_stock, p.current_price, p.target_price, p.lowest_price, p.highest_price]);
+      out.push([p.name, p.url, p.currency, h.checked_at, h.price, h.in_stock, h.source, p.current_price, p.target_price, p.lowest_price, p.highest_price]);
     }
   }
 
   const csv = toCsv(
-    ["product", "url", "currency", "checked_at", "price", "in_stock", "current_price", "target_price", "lowest_price", "highest_price"],
+    ["product", "url", "currency", "checked_at", "price", "in_stock", "source", "current_price", "target_price", "lowest_price", "highest_price"],
     out
   );
   const date = new Date().toISOString().slice(0, 10);

@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   mapWithConcurrency,
   MAX_FAILURES,
+  readingGap,
   runPriceCheck,
+  runWatchCheck,
   withRetry,
   type PipelineItem,
   type PipelineStore,
   type Tracker,
+  type WatchStore,
 } from "@/lib/pipeline";
 import type { ScrapedProduct, Scraper } from "@/lib/scraper";
 
@@ -25,6 +28,7 @@ function item(overrides: Partial<PipelineItem> = {}): PipelineItem {
     lowest_price: 100,
     pending_price: null,
     fail_count: 0,
+    last_read_at: null,
     ...overrides,
   };
 }
@@ -106,13 +110,13 @@ describe("runPriceCheck", () => {
     expect(scraper.scrape).toHaveBeenCalledTimes(1);
     expect(summary).toMatchObject({ itemsChecked: 1, priceChanges: 1, alertsSent: 2 });
     expect(store.deliverAlert.mock.calls.map(([e]) => e.tracker.user_id)).toEqual(["u1", "u3"]);
-    expect(store.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: true, confirmed: false });
+    expect(store.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: true, confirmed: false, gapFrom: null });
   });
 
   it("does not alert or record a change when nothing changed", async () => {
     const store = fakeStore([item()]);
     await runPriceCheck({ scrape: async () => scraped(100) }, store, { sleep: noSleep });
-    expect(store.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: false, confirmed: false });
+    expect(store.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: false, confirmed: false, gapFrom: null });
     expect(store.trackersOf).not.toHaveBeenCalled();
   });
 
@@ -133,7 +137,7 @@ describe("runPriceCheck", () => {
 
     const second = fakeStore([item({ original_price: null, pending_price: 30 })]);
     const summary = await runPriceCheck({ scrape: async () => scraped(30, { originalPrice: null }) }, second, { sleep: noSleep });
-    expect(second.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: true, confirmed: true });
+    expect(second.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), { priceChanged: true, confirmed: true, gapFrom: null });
     expect(summary.alertsSent).toBe(1);
   });
 
@@ -177,5 +181,67 @@ describe("runPriceCheck", () => {
     });
     expect(summary.itemsChecked).toBe(2);
     expect(summary.skippedForTime).toBe(1);
+  });
+});
+
+describe("readingGap", () => {
+  const now = Date.UTC(2026, 9, 18);
+  const ago = (days: number) => new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+
+  it("is null for a never-read item or one read within the gap window", () => {
+    expect(readingGap(null, now)).toBeNull();
+    expect(readingGap(ago(7), now)).toBeNull();
+  });
+
+  it("starts at the last reading after a longer silence", () => {
+    expect(readingGap(ago(30), now)).toBe(ago(30));
+  });
+});
+
+describe("gaps in the daily check", () => {
+  it("marks a reading after a long silence as ending a gap, even when the price is unchanged", async () => {
+    const lastRead = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+    const store = fakeStore([item({ last_read_at: lastRead })]);
+    await runPriceCheck({ scrape: async () => scraped(100) }, store, { sleep: noSleep });
+    expect(store.saveResult).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      priceChanged: false,
+      confirmed: false,
+      gapFrom: lastRead,
+    });
+    expect(store.deliverAlert).not.toHaveBeenCalled();
+  });
+});
+
+describe("runWatchCheck", () => {
+  function watchStore(items: PipelineItem[]) {
+    const { dueItems: _due, ...rest } = fakeStore(items, []);
+    return {
+      ...rest,
+      watchedItems: vi.fn<WatchStore["watchedItems"]>(async () => items),
+      saveMiss: vi.fn<WatchStore["saveMiss"]>(async () => {}),
+    } satisfies WatchStore;
+  }
+
+  it("records readings for watched items and never alerts", async () => {
+    const store = watchStore([item()]);
+    const summary = await runWatchCheck({ scrape: async () => scraped(80) }, store);
+    expect(summary).toEqual({ checked: 1, misses: 0 });
+    expect(store.saveResult).toHaveBeenCalledTimes(1);
+    expect(store.deliverAlert).not.toHaveBeenCalled();
+  });
+
+  it("treats a blocked page as a miss, not a failure that could pause the item", async () => {
+    const store = watchStore([item()]);
+    const summary = await runWatchCheck(
+      {
+        scrape: async () => {
+          throw new Error("blocked");
+        },
+      },
+      store
+    );
+    expect(summary).toEqual({ checked: 0, misses: 1 });
+    expect(store.saveMiss).toHaveBeenCalledTimes(1);
+    expect(store.saveFailure).not.toHaveBeenCalled();
   });
 });

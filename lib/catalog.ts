@@ -18,6 +18,9 @@ export async function findItemByKey(key: string) {
   return (await db.query.catalogItems.findFirst({ where: eq(catalogItems.key, key) })) ?? null;
 }
 
+/** A new item someone only previewed is still watched (checked weekly) for this long. */
+const WATCH_NEW_MS = 90 * 24 * 60 * 60 * 1000;
+
 /** Create a catalog item from its first (already guarded) reading, with a first history row. */
 export async function createItem(key: ProductKey, scraped: ScrapedProduct, source: PriceSource = "add") {
   const now = new Date().toISOString();
@@ -34,9 +37,11 @@ export async function createItem(key: ProductKey, scraped: ScrapedProduct, sourc
       currency: scraped.currency,
       in_stock: scraped.inStock,
       last_checked_at: now,
+      last_read_at: now,
+      watch_until: new Date(Date.now() + WATCH_NEW_MS).toISOString(),
     })
     // Two users adding the same new product at once: the second just attaches.
-    .onConflictDoUpdate({ target: catalogItems.key, set: { last_checked_at: now } })
+    .onConflictDoUpdate({ target: catalogItems.key, set: { last_checked_at: now, last_read_at: now } })
     .returning();
   await db.insert(priceHistory).values({
     catalog_item_id: item!.id,
@@ -44,6 +49,7 @@ export async function createItem(key: ProductKey, scraped: ScrapedProduct, sourc
     currency: scraped.currency,
     in_stock: scraped.inStock,
     source,
+    checked_at: now,
   });
   return item!;
 }
